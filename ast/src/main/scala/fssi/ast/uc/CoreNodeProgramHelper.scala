@@ -128,6 +128,8 @@ private[uc] trait CoreNodeProgramHelper[F[_]] extends BaseProgram[F] {
 
     val height = block.height
     for {
+      _ <- rollbackConsensus(block)
+      _ <- info(s"roll back consensus engine status for block: ${block.height}")
       _ <- cleanUndeterminedBlock(block)
       _ <- info(s"clean undetermined block: ${block.height}")
       _ <- rollbackStagedToken(height)

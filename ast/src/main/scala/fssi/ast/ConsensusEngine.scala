@@ -18,6 +18,11 @@ import bigknife.sop.implicits._
     */
   def tryToAgreeBlock(account: Account, previous: Block, agreeing: Block): P[F, Unit]
 
+  /** in some situations, we should rollback current consensus states
+    * @param block abandon the states at the height of the block
+    */
+  def rollbackConsensus(block: Block): P[F, Unit]
+
   /** handle consensus-special message
     */
   def handleConsensusAuxMessage(account: Account, auxMessage: ConsensusAuxMessage): P[F, Unit]

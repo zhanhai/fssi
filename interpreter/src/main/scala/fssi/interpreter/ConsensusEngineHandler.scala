@@ -64,6 +64,17 @@ class ConsensusEngineHandler
       }
     }
 
+    /** in some situations, we should rollback current consensus states
+    * @param block abandon the states at the height of the block
+    */
+  override  def rollbackConsensus(block: Block): Stack[Unit] = Stack {setting =>
+    setting match {
+      case x: Setting.CoreNodeSetting =>
+        val scpSetting = unsafeResolveSCPSetting
+      case _ => //nothing todo
+    }
+  }
+
   /** handle consensus-special message
     */
   override def handleConsensusAuxMessage(account: Account,
