@@ -108,6 +108,7 @@ private[uc] trait CoreNodeProgramHelper[F[_]] extends BaseProgram[F] {
     for {
       _ <- saveBlock(block)
       _ <- cleanUndeterminedBlock(block)
+      _ <- info(s"clean undetermined block: ${block.height}")
       _ <- commitStagedToken(height)
       _ <- info(s"commit staged token of block($height)")
       _ <- commitStagedContract(height)
@@ -122,10 +123,13 @@ private[uc] trait CoreNodeProgramHelper[F[_]] extends BaseProgram[F] {
     import tokenStore._
     import contractDataStore._
     import contractStore._
+    import blockStore._
     import log._
 
     val height = block.height
     for {
+      _ <- cleanUndeterminedBlock(block)
+      _ <- info(s"clean undetermined block: ${block.height}")
       _ <- rollbackStagedToken(height)
       _ <- info(s"rollback staged token of block($height)")
       _ <- rollbackStagedContract(height)
