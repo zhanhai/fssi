@@ -74,6 +74,12 @@ trait CoreNodeProgram[F[_]] extends BaseProgram[F] with CoreNodeProgramHelper[F]
     import consensusEngine._
     import network._
     import log._
+
+    // validate transaction:
+    // 1. signature should be validated
+    // 2. transaction's timestamp should be roughly the same as current timestamp in current node
+
+
     for {
       toBeSingedBytes <- calculateSingedBytesOfTransaction(transaction)
       verified <- verifySignature(toBeSingedBytes,
