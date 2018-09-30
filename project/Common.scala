@@ -119,6 +119,14 @@ object Common {
           )
     }
 
+    object scp {
+      def apply(): Project =
+        prj("scp", "scp")
+          .settings(
+            libraryDependencies ++= (all.sop ++ all.cats)
+          )
+    }
+
     object interpreter {
       def apply(): Project =
         prj("interpreter", "interpreter")
