@@ -123,7 +123,7 @@ object Common {
       def apply(): Project =
         prj("scp", "scp")
           .settings(
-            libraryDependencies ++= (all.sop ++ all.cats)
+            libraryDependencies ++= (all.sop ++ all.cats ++ all.circe)
           )
     }
 
