@@ -6,9 +6,6 @@ import org.scalatest._
 import fssi.scp.types._
 
 class BallotSpec extends FunSuite {
-  case class IntValue(i: Int) extends Value {
-    def compare(other: IntValue): Int = 0
-  }
 
   implicit val O: Ordering[IntValue] = new Ordering[IntValue] {
     def compare(a1: IntValue, a2: IntValue): Int = Ordering[Int].compare(a1.i, a2.i)

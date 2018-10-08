@@ -6,5 +6,5 @@ package object types {
       extends fssi.base.BytesValue.Implicits
       with NodeID.Implicits
       with Signature.Implicits
-
+      with Value.Implicits
 }

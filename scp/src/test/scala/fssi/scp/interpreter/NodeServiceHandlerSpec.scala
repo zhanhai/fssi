@@ -13,7 +13,7 @@ class NodeServiceHandlerSpec extends FunSuite {
 
   import context._
 
-  test("nodeId weightIn flat slices") {
+  test("priority of local") {
     val node1 = NodeID("node1".getBytes)
     val node2 = NodeID("node2".getBytes)
     val node3 = NodeID("node3".getBytes)
@@ -21,21 +21,37 @@ class NodeServiceHandlerSpec extends FunSuite {
 
     val slices1 = Slices.flat(3, node1, node2, node3, node4)
     val p = for {
-      weight1 <- nodeServiceHandler.weightIn(node1, slices1)
-      weight2 <- nodeServiceHandler.weightIn(node2, slices1)
-      weight3 <- nodeServiceHandler.weightIn(node3, slices1)
-      weight4 <- nodeServiceHandler.weightIn(node4, slices1)
+      weight1 <- nodeServiceHandler.priorityOfLocal(node1, 1, 1, IntValue(1), slices1)
+      weight2 <- nodeServiceHandler.priorityOfLocal(node2, 1, 1, IntValue(1), slices1)
+      weight3 <- nodeServiceHandler.priorityOfLocal(node3, 1, 1, IntValue(1), slices1)
+      weight4 <- nodeServiceHandler.priorityOfLocal(node4, 1, 1, IntValue(1), slices1)
     } yield (weight1, weight2, weight3, weight4)
 
     val (a, b, c, d) = p(setting).unsafeRunSync
 
     info(s"weight of node1 in slice1 is $a,$b,$c,$d")
-    assert(a == b)
-    assert(b == c)
-    assert(c == d)
-    assert(d == a)
   }
 
+  test("priority of peer") {
+    val node1 = NodeID("node1".getBytes)
+    val node2 = NodeID("node2".getBytes)
+    val node3 = NodeID("node3".getBytes)
+    val node4 = NodeID("node4".getBytes)
+
+    val slices1 = Slices.flat(3, node1, node2, node3, node4)
+    val p = for {
+      weight1 <- nodeServiceHandler.priorityOfPeer(node1, 3, 1, IntValue(1), slices1)
+      weight2 <- nodeServiceHandler.priorityOfPeer(node2, 3, 1, IntValue(1), slices1)
+      weight3 <- nodeServiceHandler.priorityOfPeer(node3, 3, 1, IntValue(1), slices1)
+      weight4 <- nodeServiceHandler.priorityOfPeer(node4, 3, 1, IntValue(1), slices1)
+    } yield (weight1, weight2, weight3, weight4)
+
+    val (a, b, c, d) = p(setting).unsafeRunSync
+
+    info(s"weight of node1 in slice1 is $a,$b,$c,$d")
+  }
+
+  /*
   test("nodeId weightIn nest slices") {
     val node1 = NodeID("node1".getBytes)
     val node2 = NodeID("node2".getBytes)
@@ -145,4 +161,5 @@ class NodeServiceHandlerSpec extends FunSuite {
     info(s"isNeighbor node8 in slices1 on round 1 = $priority8")
 
   }
+   */
 }

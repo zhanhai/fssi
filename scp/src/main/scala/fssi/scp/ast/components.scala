@@ -13,5 +13,9 @@ object components {
     //val log: LogService[F]
 
     val nodeService: NodeService[F]
+    val nodeStore: NodeStore[F]
+    val slicesService: SlicesService[F]
+    val slicesStore: SlicesStore[F]
+    val logService: LogService[F]
   }
 }

@@ -17,6 +17,14 @@ sealed trait Slices {
                   validators1,
                   (inners1 :+ Slices.flat(threshold, validators: _*).asInstanceOf[Slices.Flat]): _*)
   }
+
+  final def allNodes: Set[NodeID] = this match {
+    case Slices.Flat(_, validators) => validators.toSet
+    case Slices.Nest(_, validators, inners) =>
+      inners.foldLeft(validators.toSet) {(acc, n) =>
+        acc ++ n.validators.toSet
+      }
+  }
 }
 
 object Slices {

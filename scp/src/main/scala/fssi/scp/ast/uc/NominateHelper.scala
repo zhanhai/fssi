@@ -1,0 +1,69 @@
+package fssi
+package scp
+package ast
+package uc
+
+import bigknife.sop._
+import bigknife.sop.macros._
+import bigknife.sop.implicits._
+
+import fssi.scp.types._
+
+trait NominateHelper[F[_]] extends BaseProgram[F] {
+  import model._
+
+  /** calculate leaders for n-th round
+    */
+  def roundLeaders(nodeId: NodeID,
+                   slotIndex: BigInt,
+                   round: Int,
+                   previousValue: Value): SP[F, Set[NodeID]] = {
+    import slicesService._
+    import slicesStore._
+    import nodeService._
+    import logService._
+    for {
+      _             <- info(s"find round leaders: nodeId = $nodeId, slotIndex = $slotIndex, round = $round")
+      slices        <- getSlices(nodeId).get(new RuntimeException(s"No Quorum Slices Found for $nodeId"))
+      _             <- debug(s"slices for $nodeId is $slices")
+      withoutNodeId <- delete(slices, nodeId)
+      simplified    <- simplify(withoutNodeId)
+      _             <- debug(s"normalized slices for $nodeId is $slices")
+      initNodesAndPriority = priorityOfLocal(nodeId, slotIndex, round, previousValue, simplified)
+        .map(x => (Set(nodeId), x)): SP[F, (Set[NodeID], Long)]
+      finalNodesAndPriority <- simplified.allNodes.foldLeft(initNodesAndPriority) { (acc, n) =>
+        for {
+          pre <- acc
+          cur <- priorityOfPeer(n, slotIndex, round, previousValue, simplified).map(x => (n, x))
+        } yield {
+          if (cur._2 > pre._2) (Set.empty[NodeID], cur._2)
+          else if (cur._2 == pre._2 && cur._2 > 0) (pre._1 + n, pre._2)
+          else pre
+        }
+      }
+      leaders = finalNodesAndPriority._1
+      _ <- info(s"found leaders: $leaders")
+    } yield leaders
+  }
+
+  def isLeader(nodeId: NodeID, leaders: Set[NodeID]): SP[F, Boolean] = {
+    leaders.exists(_ === nodeId).pureSP[F]
+  }
+
+  def votesFromLeaders(leaders: Set[NodeID]): SP[F, Set[Value]] = {
+    ???
+  }
+
+  def vote(value: Value): SP[F, Set[Value]] = Set(value).pureSP[F]
+
+  def emitNomination(): SP[F, Unit] = ???
+
+  def setupNominateTimer(): SP[F, Unit] = ???
+
+}
+
+object NominateHelper {
+  def apply[F[_]](implicit M: components.Model[F]): NominateHelper[F] = new NominateHelper[F] {
+    val model = M
+  }
+}
