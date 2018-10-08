@@ -7,8 +7,9 @@ package object types {
   type UserContract = Contract.UserContract
 
   object syntax extends BytesValue.Syntax
+
   object implicits
-      extends base.BaseTypeImplicits
+      extends types.base.BaseTypeImplicits
       with biz.Account.Implicits
       with biz.Transaction.Implicits
       with biz.Token.Implicits

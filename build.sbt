@@ -7,11 +7,14 @@ scalaVersion in ThisBuild := "2.12.4"
 coverageEnabled in (Test, test) := true
 enablePlugins(PackPlugin)
 
+lazy val pBase = base()
+
 // utils
 lazy val pUtils = utils()
 
 lazy val pTypes = types()
   .dependsOn(pUtils)
+  .dependsOn(pBase)
 
 lazy val pTypesJson = typesJson()
   .dependsOn(pTypes)
@@ -21,8 +24,7 @@ lazy val pAst = ast()
   .dependsOn(pContractLib)
 
 lazy val pScp = scp()
-  .dependsOn(pTypes)
-
+  .dependsOn(pBase)
 
 lazy val pInterperter = interpreter()
   .dependsOn(pAst)

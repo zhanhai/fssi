@@ -1,8 +1,6 @@
 package fssi
-package types
 package base
 
-import utils._
 import scala.util._
 
 /** Base type, the raw bytes

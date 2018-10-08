@@ -3,7 +3,7 @@ package types
 package base
 
 trait BaseTypeImplicits
-    extends BytesValue.Implicits
+    extends fssi.base.BytesValue.Implicits
     with Hash.Implicits
     with Base58Check.Implicits
     with Signature.Implicits

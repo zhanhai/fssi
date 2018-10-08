@@ -88,7 +88,7 @@ object Transaction {
     }
 
     implicit def bizTransactionToBytesValue(a: Transaction): Array[Byte] = a match {
-      case x: Transfer => bizTransactionToBytesValue(x)
+      case x: Transfer => bizTransferToBytesValue(x)
       case x: Deploy   => bizDeployToBytesValue(x)
       case x: Run      => bizRunToBytesValue(x)
     }
