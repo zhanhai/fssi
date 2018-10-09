@@ -12,7 +12,6 @@ import fssi.scp.types._
   def triggerNextRoundNominate(delay: Long,
                                nodeId: NodeID,
                                slotIndex: BigInt,
-                               nextRound: Int,
                                value: Value,
                                previousValue: Value): P[F, Unit]
 }

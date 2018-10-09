@@ -33,11 +33,12 @@ trait NominateProgram[F[_]] extends BaseProgram[F] with NominateHelper[F] {
       votes    <- getVotes(nodeId, slotIndex, round)
       leader   <- isLeader(nodeId, leaders)
       newVotes <- if (leader) vote(value) else votesFromLeaders(leaders)
+      _        <- updateVotes(newVotes, nodeId, slotIndex, round)
       voted    <- hasVotedNewValue(votes, nodeId, slotIndex, round)
+      _        <- setupNominateTimer(nodeId, slotIndex, value, previousValue) // SHOULD invoke renominate finally
       _ <- __if(voted) {
         for {
           _ <- emitNomination(nodeId, slotIndex, round)
-          _ <- setupNominateTimer(nodeId, slotIndex, round, value, previousValue) // SHOULD invoke renominate finally
         } yield ()
       }
     } yield voted

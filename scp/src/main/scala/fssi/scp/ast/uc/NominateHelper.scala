@@ -108,14 +108,15 @@ trait NominateHelper[F[_]] extends BaseProgram[F] with EnvelopeProcessProgram[F]
 
   def setupNominateTimer(nodeId: NodeID,
                          slotIndex: BigInt,
-                         round: Int,
                          value: Value,
                          previousValue: Value): SP[F, Unit] = {
     import nominateService._
+    import nominateStore._
 
     for {
+      round <- getCurrentRound(nodeId, slotIndex)
       delay <- nextRoundTimeout(round)
-      _     <- triggerNextRoundNominate(delay, nodeId, slotIndex, round + 1, value, previousValue)
+      _     <- triggerNextRoundNominate(delay, nodeId, slotIndex, value, previousValue)
     } yield ()
   }
 
