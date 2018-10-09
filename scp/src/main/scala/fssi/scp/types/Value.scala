@@ -9,6 +9,14 @@ trait Value {
 }
 
 object Value {
+
+  sealed trait Validity
+  object Validity {
+    case object FullyValidate extends Validity
+    case object Invalid extends Validity
+    case object MaybeValid extends Validity
+  }
+
   trait Implicits {
     implicit def scpValueToBytesValue(x: Value): Array[Byte] = x.bytes
   }

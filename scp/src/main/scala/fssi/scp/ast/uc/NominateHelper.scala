@@ -9,7 +9,7 @@ import bigknife.sop.implicits._
 
 import fssi.scp.types._
 
-trait NominateHelper[F[_]] extends BaseProgram[F] {
+trait NominateHelper[F[_]] extends BaseProgram[F] with EnvelopeProcessProgram[F] {
   import model._
 
   /** calculate leaders for n-th round
@@ -46,19 +46,78 @@ trait NominateHelper[F[_]] extends BaseProgram[F] {
     } yield leaders
   }
 
-  def isLeader(nodeId: NodeID, leaders: Set[NodeID]): SP[F, Boolean] = {
+  def isLeader(nodeId: NodeID, leaders: Set[NodeID]): SP[F, Boolean] =
     leaders.exists(_ === nodeId).pureSP[F]
-  }
 
   def votesFromLeaders(leaders: Set[NodeID]): SP[F, Set[Value]] = {
-    ???
+    import nominateStore._
+    import valueService._
+
+    // votes from leader, check validity and only use valid value
+    def votesFromLeader(leader: NodeID): SP[F, Option[Value]] =
+      for {
+        nom <- getLatestNomination(leader).getOrElse(Message.Nominate.empty[Value])
+        v <- nom.allValue.foldLeft(Option.empty[Value].pureSP[F]) { (acc, n) =>
+          // through the iteration, current accumulated value is always higher than previous accumulated value
+          // after that, we get the highest value
+          for {
+            pre <- acc
+            higherOpt <- if (pre.isEmpty) extractValidValue(n): SP[F, Option[Value]]
+            else
+              for {
+                v <- extractValidValue(n)
+                h <- higherValue(v, pre)
+              } yield h
+          } yield higherOpt
+        }
+      } yield v
+
+    // iterate leaders to collect all valid value
+    leaders.foldLeft(Set.empty[Value].pureSP[F]) { (acc, n) =>
+      for {
+        pre <- acc
+        v   <- votesFromLeader(n)
+      } yield pre ++ v.toSet
+    }
   }
 
   def vote(value: Value): SP[F, Set[Value]] = Set(value).pureSP[F]
 
-  def emitNomination(): SP[F, Unit] = ???
+  def emitNomination(nodeId: NodeID, slotIndex: BigInt, round: Int): SP[F, Unit] = {
+    import slicesStore._
+    import nominateStore._
+    import messageService._
 
-  def setupNominateTimer(): SP[F, Unit] = ???
+    for {
+      quorumSet <- getQuorumSet(nodeId).get(
+        new RuntimeException(s"No Quorum Set Found for $nodeId"))
+      votes             <- getVotes(nodeId, slotIndex, round)
+      accepted          <- getAccepted(nodeId, slotIndex, round)
+      nominationEnvelop <- createNominationEnvelop(nodeId, slotIndex, quorumSet, votes, accepted)
+      lastEnvelope      <- getLastEmittedEnvelope(nodeId)
+      _ <- __if(
+        lastEnvelope.isEmpty || nominationEnvelop.statement.message
+          .isNewerThan(lastEnvelope.get.statement.message)) {
+        for {
+          _ <- updateLastEmmitedEnvelop(nodeId, nominationEnvelop)
+          _ <- emitEnvelope(nominationEnvelop)
+        } yield ()
+      }
+    } yield ()
+  }
+
+  def setupNominateTimer(nodeId: NodeID,
+                         slotIndex: BigInt,
+                         round: Int,
+                         value: Value,
+                         previousValue: Value): SP[F, Unit] = {
+    import nominateService._
+
+    for {
+      delay <- nextRoundTimeout(round)
+      _     <- triggerNextRoundNominate(delay, nodeId, slotIndex, round + 1, value, previousValue)
+    } yield ()
+  }
 
 }
 

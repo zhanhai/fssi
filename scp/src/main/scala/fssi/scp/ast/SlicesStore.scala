@@ -9,7 +9,11 @@ import bigknife.sop.implicits._
 import fssi.scp.types._
 
 @sp trait SlicesStore[F[_]] {
-  /** get slices for a node
+  /** get slices of a node
     */
   def getSlices(nodeId: NodeID): P[F, Option[Slices]]
+
+  /** get quorum set of a node
+    */
+  def getQuorumSet(nodeId: NodeID): P[F, Option[QuorumSet]]
 }

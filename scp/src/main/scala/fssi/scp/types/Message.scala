@@ -6,7 +6,9 @@ import scala.collection._
 
 /** SCP messages
   */
-sealed trait Message
+sealed trait Message {
+  def isNewerThan(other: Message): Boolean = ???
+}
 
 object Message {
 
@@ -16,9 +18,15 @@ object Message {
     * monotonically growing set of values: voted and accepted.
     */
   case class Nominate[A <: Value](
-      voted: immutable.TreeSet[A],
-      accepted: immutable.TreeSet[A]
-  ) extends Message
+      voted: Set[A],
+      accepted: Set[A]
+  ) extends Message {
+    def allValue: Set[A] = voted ++ accepted
+  }
+
+  object Nominate {
+    def empty[A <: Value]: Nominate[A] = Nominate(Set.empty[A], Set.empty[A])
+  }
 
   /* for all ballot messages: 
     * Variable Meaning

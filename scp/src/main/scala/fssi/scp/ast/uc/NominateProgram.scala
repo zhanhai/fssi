@@ -18,7 +18,6 @@ trait NominateProgram[F[_]] extends BaseProgram[F] with NominateHelper[F] {
     */
   def nominate(nodeId: NodeID,
                slotIndex: BigInt,
-               round: Int,
                value: Value,
                previousValue: Value): SP[F, Boolean] = {
 
@@ -27,8 +26,9 @@ trait NominateProgram[F[_]] extends BaseProgram[F] with NominateHelper[F] {
     // 3. after found leaders, we vote the value of the leader's voted(if `nodeId` is the leader, then vote `value`)
     // 4. then emit the new nominating value and set a timer for next nominating.
     // 5. notice: if the selected value has been voted, we ignore this nominating.
-    import nodeStore._
+    import nominateStore._
     for {
+      round    <- getCurrentRound(nodeId, slotIndex)
       leaders  <- roundLeaders(nodeId, slotIndex, round, previousValue)
       votes    <- getVotes(nodeId, slotIndex, round)
       leader   <- isLeader(nodeId, leaders)
@@ -36,10 +36,23 @@ trait NominateProgram[F[_]] extends BaseProgram[F] with NominateHelper[F] {
       voted    <- hasVotedNewValue(votes, nodeId, slotIndex, round)
       _ <- __if(voted) {
         for {
-          _ <- emitNomination()
-          _ <- setupNominateTimer()
+          _ <- emitNomination(nodeId, slotIndex, round)
+          _ <- setupNominateTimer(nodeId, slotIndex, round, value, previousValue) // SHOULD invoke renominate finally
         } yield ()
       }
     } yield voted
+  }
+
+  def renominate(nodeId: NodeID,
+                 slotIndex: BigInt,
+                 value: Value,
+                 previousValue: Value): SP[F, Boolean] = {
+    import nominateStore._
+    _if(isNotNominating(nodeId, slotIndex), false) {
+      for {
+        _ <- gotoNextRound(nodeId, slotIndex)
+        r <- nominate(nodeId, slotIndex, value, previousValue)
+      } yield r
+    }
   }
 }

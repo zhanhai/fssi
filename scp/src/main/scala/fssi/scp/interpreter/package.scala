@@ -18,10 +18,13 @@ package object interpreter {
 
   object handlers
       extends NodeServiceHandler.Implicits
-      with NodeStoreHandler.Implicits
+      with NominateStoreHandler.Implicits
+      with NominateServiceHandler.Implicits
       with SlicesServiceHandler.Implicits
       with SlicesStoreHandler.Implicits
       with LogServiceHandler.Implicits
+      with ValueServiceHandler.Implicits
+      with MessageServiceHandler.Implicits
       with bigknife.sop.effect.error.ErrorMInstance
 
   object runner {
