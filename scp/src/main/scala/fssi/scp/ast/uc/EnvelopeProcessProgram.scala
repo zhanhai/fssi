@@ -11,8 +11,5 @@ import fssi.scp.types._
 
 trait EnvelopeProcessProgram[F[_]] extends BaseProgram[F] {
   import model._
-
-  def processNominationEnvelope(envelope: Envelope): SP[F, Envelope.State] = ???
-
-  def processBallotEnvelope(envelope: Envelope): SP[F, Envelope.State] = ???
+  //def processBallotEnvelope(envelope: Envelope): SP[F, Envelope.State] = ???
 }

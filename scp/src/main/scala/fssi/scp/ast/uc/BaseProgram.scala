@@ -25,6 +25,7 @@ trait BaseProgram[F[_]] {
   }
 
   def __if(cond: Boolean)(sp: => SP[F, Unit]): SP[F, Unit] = _if(cond, ())(sp)
+  def __ifThen(cond: Boolean)(_then: => SP[F, Unit]): SP[F, Unit] = __if(!cond)(_then)
 
   implicit final class SPOptionOps[A](sp: SP[F, Option[A]]) {
     def get(ex: Exception): SP[F, A] = for {
@@ -44,4 +45,14 @@ trait BaseProgram[F[_]] {
     new SPOptionOps(p: SP[F, Option[A]])
 
   implicit def __pureSP[A](a: A): SP[F, A] = a.pureSP[F]
+
+  implicit final class SCAssertOps[A](sp: SP[F, A]) {
+    def assert(p: A => Boolean, ex: Exception): SP[F, A] = for {
+      a <- sp
+      _ <- model.err.either(Either.cond(p(a), (), ex))
+    } yield a
+  }
+
+  implicit def toSCAssertOps[A](p: P[F, A]): SCAssertOps[A] =
+    new SCAssertOps(p: SP[F, A])
 }

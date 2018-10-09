@@ -19,4 +19,6 @@ import fssi.scp.types._
     * then return the higher one.
     */
   def higherValue(v1: Option[Value], v2: Option[Value]): P[F, Option[Value]]
+
+  def combineValues(values: Set[Value]): P[F, Value]
 }

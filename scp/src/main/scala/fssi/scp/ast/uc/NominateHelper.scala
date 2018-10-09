@@ -94,7 +94,9 @@ trait NominateHelper[F[_]] extends BaseProgram[F] with EnvelopeProcessProgram[F]
       votes             <- getVotes(nodeId, slotIndex, round)
       accepted          <- getAccepted(nodeId, slotIndex, round)
       nominationEnvelop <- createNominationEnvelop(nodeId, slotIndex, quorumSet, votes, accepted)
-      lastEnvelope      <- getLastEmittedEnvelope(nodeId)
+      _ <- processNominationEnvelope(nodeId, slotIndex, nominationEnvelop)
+        .assert(_.isValid, new RuntimeException("NominationEnvelop locally processing failed"))
+      lastEnvelope <- getLastEmittedEnvelope(nodeId)
       _ <- __if(
         lastEnvelope.isEmpty || nominationEnvelop.statement.message
           .isNewerThan(lastEnvelope.get.statement.message)) {
@@ -120,6 +122,59 @@ trait NominateHelper[F[_]] extends BaseProgram[F] with EnvelopeProcessProgram[F]
     } yield ()
   }
 
+  def processNominationEnvelope(nodeId: NodeID,
+                                slotIndex: BigInt,
+                                envelope: Envelope): SP[F, Envelope.State] = {
+
+    import nominateStore._
+    import nominateService._
+    import ballotStore._
+    import valueService._
+    for {
+      lastNom <- getLatestNomination[Value](nodeId)
+      sane <- isSane(envelope.statement.message)
+      isOldMessage = (lastNom.isDefined && lastNom.get.isNewerThan(envelope.statement.message))
+      state <- _if(isOldMessage || !sane, Envelope.State.invalid) {
+        for {
+          _ <- updateLatestNomination(envelope.statement.message)
+          notNominating <- isNotNominating(nodeId, slotIndex)
+          state0 <- _if(notNominating, Envelope.State.valid) {
+            for {
+              promotedAccepted <- promoteVotesToAccepted()
+              promotedCandidates <- promoteAcceptedToCandidates()
+              votedFromLeaders <- tryVoteFromLeaders()
+              modified = promotedAccepted || promotedCandidates || votedFromLeaders
+              _ <- __ifThen(modified) {
+                for {
+                  round <- getCurrentRound(nodeId, slotIndex)
+                  _ <- emitNomination(nodeId, slotIndex, round)
+                } yield ()
+              }
+
+              currentBallot <- getCurrentBallot[Value](nodeId, slotIndex)
+              _ <- __ifThen(promotedCandidates) {
+                for {
+                  round <- getCurrentRound(nodeId, slotIndex)
+                  candidates <- getCandidates(nodeId, slotIndex, round)
+                  compositeCandidate <- combineValues(candidates)
+                  _ <- updateLatestCompositeCandidate(nodeId, slotIndex, compositeCandidate)
+                  _ <- __ifThen(currentBallot.isEmpty)(bumpBallotState(nodeId, slotIndex, compositeCandidate))
+                } yield ()
+              }
+            } yield Envelope.State.valid
+          }
+        } yield state0
+      }
+    } yield state
+  }
+
+  // federated voting to promote
+  def promoteVotesToAccepted(): SP[F, Boolean] = ???
+  def promoteAcceptedToCandidates(): SP[F, Boolean] = ???
+  def tryVoteFromLeaders(): SP[F, Boolean] = ???
+
+  //todo: move to parent
+  def bumpBallotState(nodeId: NodeID, slotIndex: BigInt, value: Value): SP[F, Unit] = ???
 }
 
 object NominateHelper {

@@ -35,7 +35,7 @@ class SlicesServiceHandler extends SlicesService.Handler[Stack] with LogSupport 
           }
         val remainedInners = inners.map { x =>
           val (x_remainedValidators, x_remainedThreshold) =
-            validators.foldLeft((Vector.empty[NodeID], threshold)) { (acc, n) =>
+            x.validators.foldLeft((Vector.empty[NodeID], x.threshold)) { (acc, n) =>
               if (n === nodeId) (acc._1, acc._2 - 1)
               else (acc._1 :+ n, acc._2)
             }

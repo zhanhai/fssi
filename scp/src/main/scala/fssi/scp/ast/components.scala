@@ -20,5 +20,7 @@ object components {
     val logService: LogService[F]
     val valueService: ValueService[F]
     val messageService: MessageService[F]
+
+    val ballotStore: BallotStore[F]
   }
 }
