@@ -32,12 +32,25 @@ import fssi.scp.types._
                   slotIndex: BigInt,
                   round: Int): P[F, Boolean]
 
+  def updateAccepted(newAccepted: Set[Value],
+                     nodeId: NodeID,
+                     slotIndex: BigInt,
+                     round: Int): P[F, Boolean]
+
+  def updateCandidates(newCandidates: Set[Value],
+                       nodeId: NodeID,
+                       slotIndex: BigInt,
+                       round: Int): P[F, Boolean]
+
   def hasVotedNewValue(oldVotes: Set[Value],
                        nodeId: NodeID,
                        slotIndex: BigInt,
                        round: Int): P[F, Boolean]
 
   def getLatestNomination[A <: Value](nodeId: NodeID): P[F, Option[Message.Nominate[A]]]
+
+  def getLatestNominations[A <: Value](): P[F, Map[NodeID, Message.Nominate[A]]]
+
   def updateLatestNomination(nom: Message): P[F, Unit]
 
   def getLastEmittedEnvelope(nodeId: NodeID): P[F, Option[Envelope]]
@@ -47,6 +60,9 @@ import fssi.scp.types._
   def updateLatestCompositeCandidate(nodeId: NodeID, slotIndex: BigInt, value: Value): P[F, Unit]
 
   def getRoundLeaders(nodeId: NodeID, slotIndex: BigInt, round: Int): P[F, Option[Set[NodeID]]]
-  def updateRoundLeaders(leaders: Set[NodeID], nodeId: NodeID, slotIndex: BigInt, round: Int): P[F, Unit]
+  def updateRoundLeaders(leaders: Set[NodeID],
+                         nodeId: NodeID,
+                         slotIndex: BigInt,
+                         round: Int): P[F, Unit]
 
 }

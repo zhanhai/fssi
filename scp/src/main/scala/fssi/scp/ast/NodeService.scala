@@ -10,16 +10,6 @@ import fssi.scp.types._
 
 @sp trait NodeService[F[_]] {
 
-  /** For each peer v, define weight(v) as the fraction of quorum slices containing v.
-    * if the nodeId is repeated multiple times, it's weight is only the weight of the first occurrence
-    */
-  /*
-  def weight(nodeId: NodeID,
-             slotIndex: BigInt,
-             round: Int,
-             previousValue: Value,
-             slices: Slices): P[F, Long]
-   */
 
   /** compute priority for a local node.
     * Define priority(n, v) as Gi(2 || n || v), where 2 and n are both 32-bit XDR int values.
@@ -41,14 +31,17 @@ import fssi.scp.types._
                      previousValue: Value,
                      slices: Slices): P[F, Long]
 
-  /** Define the set of nodes neighbors(n) as the set of nodes v for which
-    * Gi(1 || n || v) < 2^{256} * weight(v), where 1 and n are both 32-bit XDR int values.
+
+  /** can a node set be a V-Blocking set in v's slices ?
+    * @param nodes maybe a v-blocking set.
+    * @param slices node v's quorum set.
     */
-  /*
-  def isNeighbor(nodeId: NodeID,
-                 slotIndex: BigInt,
-                 round: Int,
-                 previousValue: Value,
-                 slices: Slices): P[F, Boolean]
-   */
+  def isVBlocking(nodes: Set[NodeID], slices: Slices): P[F, Boolean]
+
+  /** can a node set be a Quorum in a node v's Slices
+    * @param nodes maybe a quorum
+    * @param slices node v's quorum set.
+    */
+  def isQuorum(nodes: Set[NodeID], slices: Slices): P[F, Boolean]
+
 }

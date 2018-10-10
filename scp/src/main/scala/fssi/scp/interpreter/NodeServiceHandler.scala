@@ -10,57 +10,6 @@ import bigknife.sop._
 
 class NodeServiceHandler extends NodeService.Handler[Stack] with LogSupport {
 
-  /** For each peer v, define weight(v) as the fraction of quorum slices containing v.
-    * if the nodeId is repeated multiple times, it's weight is only the weight of the first occurrence
-    */
-  /*
-  override def weight(nodeId: NodeID,
-                      slotIndex: BigInt,
-                      round: Int,
-                      previousValue: Value,
-                      slices: Slices): Stack[Long] = Stack {
-    import Slices._
-
-    def compute(a: BigInt, b: BigInt, c: BigInt): Long = {
-      val bi = (a * b + c - 1) / c
-      bi.toLong
-    }
-
-    slices match {
-      case Flat(threshold, validators) if validators.contains(nodeId) =>
-        // (a * b + c - 1) / c
-        val a = BigInt(Long.MaxValue)
-        val b = BigInt(threshold)
-        val c = BigInt(validators.size)
-        compute(a, b, c)
-
-      case Nest(threshold, validators, inners) if validators.contains(nodeId) =>
-        // (a * b + c - 1) / c
-        val a = BigInt(Long.MaxValue)
-        val b = BigInt(threshold)
-        val c = BigInt(validators.size + inners.size)
-        compute(a, b, c)
-
-      case Nest(threshold, validators, inners) =>
-        inners
-          .find(_.validators.contains(nodeId))
-          .map { s =>
-            val a = BigInt(Long.MaxValue)
-            val b = BigInt(s.threshold)
-            val c = BigInt(s.validators.size)
-
-            // the node's weight in inners
-            val leafW = compute(a, b, c)
-            // let the leafW as the `a`, recompute in total slices
-            compute(a = leafW, b = BigInt(threshold), c = BigInt(validators.size + inners.size))
-          }
-          .getOrElse(0L)
-
-      case _ => 0L
-    }
-  }
-   */
-
   /** compute priority for a local node.
     * Define priority(n, v) as Gi(2 || n || v), where 2 and n are both 32-bit XDR int values.
     * @param nodeId this node is a local node, in every slices, but maybe be deleted.
@@ -112,32 +61,55 @@ class NodeServiceHandler extends NodeService.Handler[Stack] with LogSupport {
            (2.asBytesValue.any ++ round.asBytesValue.any ++ nodeId.asBytesValue.any).bytes)
     } else 0
   }
-  /*
-  override def priority(round: Int, nodeId: NodeID): Stack[Long] = Stack {
-    val m = (round.asBytesValue.any ++ nodeId.asBytesValue.any).bytes
-    BigInt(Gi(2, m)).toLong
-  }
-   */
 
-  /** Define the set of nodes neighbors(n) as the set of nodes v for which
-    * Gi(1 || n || v) < 2^{256} * weight(v), where 1 and n are both 32-bit XDR int values.
-    * @param round n, the nominating round number
-    * @param nodeId node id, validator
+  /** can a node set be a V-Blocking set in v's slices ?
+    * @param nodes maybe a v-blocking set.
+    * @param slices node v's quorum set.
     */
-  /*
-  override def isNeighbor(nodeId: NodeID,
-                          slotIndex: BigInt,
-                          round: Int,
-                          previousValue: Value,
-                          slices: Slices): Stack[Boolean] = Stack {
-    val extra = (1.asBytesValue.any ++ round.asBytesValue.any ++ nodeId.asBytesValue.any).bytes
-    val gi    = hash(slotIndex, previousValue, extra)
+  override def isVBlocking(nodes: Set[NodeID], slices: Slices): Stack[Boolean] = Stack {
+    if (slices.threshold == 0) false
+    else {
+      // ref: what's vblocking set.
+      // Definition (𝑣-blocking).
+      // Let 𝑣 ∈ 𝐕 be a node in FBAS ⟨𝐕, 𝐐⟩. A set 𝐵 ⊆ 𝐕 is 𝑣-blocking iff it overlaps
+      //     every one of 𝑣’s slices—i.e., ∀𝑞 ∈ 𝐐(𝑣), 𝑞 ∩ 𝐵 ≠ ∅.
+      slices match {
+        case Slices.Flat(threshold, validators) =>
+          val blockingNum = validators.size - threshold + 1
+          // if count of the intersection between validators and nodes is `ge` blockingNum, then it's a vblocking set
+          nodes.count(validators.contains) >= blockingNum
+        case Slices.Nest(threshold, validators, inners) =>
+          val blockingNum = validators.size + inners.size - threshold + 1
+          // inners is a Vector of Flat. if any inner is not covered, then it's not vblocking set
+          // then check the outter, inner's vblocking count + outter validators' vblocking, if that number is ge blockingNum
+          //      totally, it's a vblocking set
+          val innerBlockingCount = inners.count {f =>
+            val fBlockingNum = f.validators.size - f.threshold + 1
+            nodes.count(f.validators.contains) >= fBlockingNum
+          }
+          val outterBlockingCount = nodes.count(validators.contains)
 
-    for {
-      weight <- weightIn(nodeId, slices)
-    } yield gi < weight
+          (innerBlockingCount + outterBlockingCount) >= blockingNum
+      }
+    }
   }
-   */
+
+  /** can a node set be a Quorum in a node v's Slices
+    * @param nodes maybe a quorum
+    * @param slices node v's quorum set.
+    */
+  override def isQuorum(nodes: Set[NodeID], slices: Slices): Stack[Boolean] = Stack {
+    slices match {
+      case Slices.Flat(threshold, validators) =>
+        nodes.count(validators.contains) >= threshold
+      case Slices.Nest(threshold, validators, inners) =>
+        val innerCount = inners.count {f =>
+          nodes.count(f.validators.contains) >= f.threshold
+        }
+        val outterCount = nodes.count(validators.contains)
+        (innerCount + outterCount) >= threshold
+    }
+  }
 
   private def hash(slotIndex: BigInt, previousValue: Value, extra: Array[Byte]): Long = {
     import org.bouncycastle.jcajce.provider.digest.SHA3
@@ -187,6 +159,8 @@ class NodeServiceHandler extends NodeService.Handler[Stack] with LogSupport {
       case _ => 0L
     }
   }
+
+  
 }
 
 object NodeServiceHandler {

@@ -7,6 +7,8 @@ import fssi.scp.types.implicits._
 /** Quorum Slices
   */
 sealed trait Slices {
+  def threshold: Int
+
   final def nest(threshold: Int, validators: NodeID*): Slices = this match {
     case Slices.Flat(threshold1, validators1) =>
       Slices.nest(threshold1,

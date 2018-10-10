@@ -153,23 +153,22 @@ trait NominateHelper[F[_]] extends BaseProgram[F] with BallotBridge[F] {
     import nominateService._
     import ballotStore._
     import valueService._
+
+    val message = envelope.statement.message
     for {
       lastNom <- getLatestNomination[Value](nodeId)
       sane    <- isSane(envelope.statement.message)
-      isOldMessage = (lastNom.isDefined && lastNom.get.isNewerThan(envelope.statement.message))
+      isOldMessage = (lastNom.isDefined && lastNom.get.isNewerThan(message))
       state <- _if(isOldMessage || !sane, Envelope.invalidState) {
         for {
-          _             <- updateLatestNomination(envelope.statement.message)
+          _             <- updateLatestNomination(message)
           notNominating <- isNotNominating(nodeId, slotIndex)
           state0 <- _if(notNominating, Envelope.validState) {
             for {
               round              <- getCurrentRound(nodeId, slotIndex)
-              promotedAccepted   <- promoteVotesToAccepted()
-              promotedCandidates <- promoteAcceptedToCandidates()
-              votedFromLeaders <- tryVoteFromLeaders(nodeId,
-                                                     slotIndex,
-                                                     round,
-                                                     envelope.statement.message)
+              promotedAccepted   <- promoteVotesToAccepted(nodeId, slotIndex, round, message)
+              promotedCandidates <- promoteAcceptedToCandidates(nodeId, slotIndex, round, message)
+              votedFromLeaders   <- tryVoteFromLeaders(nodeId, slotIndex, round, message)
               modified = promotedAccepted || promotedCandidates || votedFromLeaders
               _ <- __ifThen(modified) {
                 for {
@@ -196,9 +195,125 @@ trait NominateHelper[F[_]] extends BaseProgram[F] with BallotBridge[F] {
   }
 
   // federated voting to promote
-  def promoteVotesToAccepted(): SP[F, Boolean]      = ???
-  def promoteAcceptedToCandidates(): SP[F, Boolean] = ???
+  def promoteVotesToAccepted(nodeId: NodeID,
+                             slotIndex: BigInt,
+                             round: Int,
+                             message: Message): SP[F, Boolean] = {
 
+    import nominateStore._
+    import slicesStore._
+    import valueService._
+
+    // two ways to accept(a)
+    // 1. if quorum accept or vote a
+    // 2. if vblocking set accept a
+
+    def votedNodes(v: Value,
+                   nominations: Map[NodeID, Message.Nominate[Value]]): SP[F, Set[NodeID]] =
+      nominations.filter {
+        case (_, nom) => nom.voted.contains(v)
+      }.keySet
+
+    def acceptedNodes(v: Value,
+                      nominations: Map[NodeID, Message.Nominate[Value]]): SP[F, Set[NodeID]] =
+      nominations.filter {
+        case (_, nom) => nom.accepted.contains(v)
+      }.keySet
+
+    def promoteValueToBeAccepted(value: Value, slices: Slices): SP[F, Boolean] = {
+      for {
+        hasAccepted <- getAccepted(nodeId, slotIndex, round)
+        result <- _if(hasAccepted.contains(value), false) {
+          for {
+            nominations <- getLatestNominations[Value]()
+            accepted <- federatedAccepted(votedNodes(value, nominations),
+                                          acceptedNodes(value, nominations),
+                                          slices)
+            promoted <- _if(!accepted, false)(
+              _if(isFullValidValue(value), for {
+                _ <- updateVotes(Set(value), nodeId, slotIndex, round)
+                _ <- updateAccepted(Set(value), nodeId, slotIndex, round)
+              } yield true) {
+                for {
+                  toVote <- extractValidValue(value)
+                  modified <- _if(toVote.isEmpty, false)(
+                    updateVotes(Set(toVote.get), nodeId, slotIndex, round))
+                } yield modified
+              }
+            )
+          } yield promoted
+        }
+      } yield result
+    }
+
+    message match {
+      case nom @ Message.Nominate(_, _) =>
+        for {
+          slices <- getSlices(nodeId).get(new RuntimeException(s"No Slices Found of $nodeId"))
+          result <- nom.voted.foldLeft(false.pureSP[F]) { (acc, n) =>
+            for {
+              pre      <- acc
+              promoted <- promoteValueToBeAccepted(n, slices)
+            } yield pre || promoted
+          }
+        } yield result
+
+      case _ => false
+    }
+
+  }
+
+  def promoteAcceptedToCandidates(nodeId: NodeID,
+                                  slotIndex: BigInt,
+                                  round: Int,
+                                  message: Message): SP[F, Boolean] = {
+
+    import nominateStore._
+    import slicesStore._
+    import valueService._
+
+    def acceptedNodes(v: Value,
+                      nominations: Map[NodeID, Message.Nominate[Value]]): SP[F, Set[NodeID]] =
+      nominations.filter {
+        case (_, nom) => nom.accepted.contains(v)
+      }.keySet
+
+    def promoteValueToBeCandidates(value: Value, slices: Slices): SP[F, Boolean] = {
+
+      for {
+        hasCandidated <- getCandidates(nodeId, slotIndex, round)
+        result <- _if(hasCandidated.contains(value), false) {
+          for {
+            nominations <- getLatestNominations[Value]()
+            ratified    <- federatedRatified(acceptedNodes(value, nominations), slices)
+            modified <- _if(!ratified, false) {
+              for {
+                _ <- updateCandidates(Set(value), nodeId, slotIndex, round)
+              } yield true
+            }
+          } yield modified
+        }
+      } yield result
+    }
+
+    message match {
+      case nom @ Message.Nominate(_, _) =>
+        for {
+          slices <- getSlices(nodeId).get(new RuntimeException(s"No Slices Found of $nodeId"))
+          result <- nom.voted.foldLeft(false.pureSP[F]) { (acc, n) =>
+            for {
+              pre      <- acc
+              promoted <- promoteValueToBeCandidates(n, slices)
+            } yield pre || promoted
+          }
+        } yield result
+
+      case _ => false
+    }
+  }
+
+  // if current candidates is empty, and node is a leader, then
+  // vote from peer's message
   def tryVoteFromLeaders[A <: Value](nodeId: NodeID,
                                      slotIndex: BigInt,
                                      round: Int,
@@ -225,7 +340,7 @@ trait NominateHelper[F[_]] extends BaseProgram[F] with BallotBridge[F] {
           }
         } yield result
 
-      case _ => false.pureSP[F]
+      case _ => false
     }
 
   }
@@ -240,7 +355,7 @@ object NominateHelper {
       * **Notice** This is only for test.
       */
     def bumpBallotState(nodeId: NodeID, slotIndex: BigInt, value: Value): SP[F, Unit] = {
-      ().pureSP[F]
+      ()
     }
   }
 }
