@@ -8,6 +8,10 @@ case class Envelope(
 )
 
 object Envelope {
+
+  def validState: State = State.valid
+  def invalidState: State = State.invalid
+
   sealed trait State {
     def isValid: Boolean
   }

@@ -45,6 +45,8 @@ import fssi.scp.types._
   def updateLastEmmitedEnvelop(nodeId: NodeID, envelope: Envelope): P[F, Unit]
 
   def updateLatestCompositeCandidate(nodeId: NodeID, slotIndex: BigInt, value: Value): P[F, Unit]
-  
+
+  def getRoundLeaders(nodeId: NodeID, slotIndex: BigInt, round: Int): P[F, Option[Set[NodeID]]]
+  def updateRoundLeaders(leaders: Set[NodeID], nodeId: NodeID, slotIndex: BigInt, round: Int): P[F, Unit]
 
 }

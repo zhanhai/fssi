@@ -9,7 +9,7 @@ import bigknife.sop.implicits._
 
 import fssi.scp.types._
 
-trait NominateHelper[F[_]] extends BaseProgram[F] with EnvelopeProcessProgram[F] {
+trait NominateHelper[F[_]] extends BaseProgram[F] with BallotBridge[F] {
   import model._
 
   /** calculate leaders for n-th round
@@ -22,32 +22,67 @@ trait NominateHelper[F[_]] extends BaseProgram[F] with EnvelopeProcessProgram[F]
     import slicesStore._
     import nodeService._
     import logService._
+    import nominateStore._
+
     for {
-      _             <- info(s"find round leaders: nodeId = $nodeId, slotIndex = $slotIndex, round = $round")
-      slices        <- getSlices(nodeId).get(new RuntimeException(s"No Quorum Slices Found for $nodeId"))
-      _             <- debug(s"slices for $nodeId is $slices")
-      withoutNodeId <- delete(slices, nodeId)
-      simplified    <- simplify(withoutNodeId)
-      _             <- debug(s"normalized slices for $nodeId is $slices")
-      initNodesAndPriority = priorityOfLocal(nodeId, slotIndex, round, previousValue, simplified)
-        .map(x => (Set(nodeId), x)): SP[F, (Set[NodeID], Long)]
-      finalNodesAndPriority <- simplified.allNodes.foldLeft(initNodesAndPriority) { (acc, n) =>
+      leadersOpt <- getRoundLeaders(nodeId, slotIndex, round)
+      cachedLeaders <- _if(leadersOpt.isDefined, leadersOpt.get) {
         for {
-          pre <- acc
-          cur <- priorityOfPeer(n, slotIndex, round, previousValue, simplified).map(x => (n, x))
-        } yield {
-          if (cur._2 > pre._2) (Set.empty[NodeID], cur._2)
-          else if (cur._2 == pre._2 && cur._2 > 0) (pre._1 + n, pre._2)
-          else pre
-        }
+          _ <- info(s"find round leaders: nodeId = $nodeId, slotIndex = $slotIndex, round = $round")
+          slices <- getSlices(nodeId).get(
+            new RuntimeException(s"No Quorum Slices Found for $nodeId"))
+          _             <- debug(s"slices for $nodeId is $slices")
+          withoutNodeId <- delete(slices, nodeId)
+          simplified    <- simplify(withoutNodeId)
+          _             <- debug(s"normalized slices for $nodeId is $slices")
+          initNodesAndPriority = priorityOfLocal(nodeId,
+                                                 slotIndex,
+                                                 round,
+                                                 previousValue,
+                                                 simplified)
+            .map(x => (Set(nodeId), x)): SP[F, (Set[NodeID], Long)]
+          finalNodesAndPriority <- simplified.allNodes.foldLeft(initNodesAndPriority) { (acc, n) =>
+            for {
+              pre <- acc
+              cur <- priorityOfPeer(n, slotIndex, round, previousValue, simplified).map(x => (n, x))
+            } yield {
+              if (cur._2 > pre._2) (Set.empty[NodeID], cur._2)
+              else if (cur._2 == pre._2 && cur._2 > 0) (pre._1 + n, pre._2)
+              else pre
+            }
+          }
+          leaders = finalNodesAndPriority._1
+          _ <- info(s"found leaders: $leaders")
+          _ <- updateRoundLeaders(leaders, nodeId, slotIndex, round)
+        } yield leaders
       }
-      leaders = finalNodesAndPriority._1
-      _ <- info(s"found leaders: $leaders")
-    } yield leaders
+    } yield cachedLeaders
+
   }
 
   def isLeader(nodeId: NodeID, leaders: Set[NodeID]): SP[F, Boolean] =
     leaders.exists(_ === nodeId).pureSP[F]
+
+  def newValueFromNomination[A <: Value](nom: Message.Nominate[A]): SP[F, Option[Value]] = {
+    // through the iteration, current accumulated value is always higher than previous accumulated value
+    // after that, we get the highest value
+    import valueService._
+    for {
+      v <- nom.allValue.foldLeft(Option.empty[Value].pureSP[F]) { (acc, n) =>
+        // through the iteration, current accumulated value is always higher than previous accumulated value
+        // after that, we get the highest value
+        for {
+          pre <- acc
+          higherOpt <- if (pre.isEmpty) extractValidValue(n): SP[F, Option[Value]]
+          else
+            for {
+              v <- extractValidValue(n)
+              h <- higherValue(v, pre)
+            } yield h
+        } yield higherOpt
+      }
+    } yield v
+  }
 
   def votesFromLeaders(leaders: Set[NodeID]): SP[F, Set[Value]] = {
     import nominateStore._
@@ -57,19 +92,7 @@ trait NominateHelper[F[_]] extends BaseProgram[F] with EnvelopeProcessProgram[F]
     def votesFromLeader(leader: NodeID): SP[F, Option[Value]] =
       for {
         nom <- getLatestNomination(leader).getOrElse(Message.Nominate.empty[Value])
-        v <- nom.allValue.foldLeft(Option.empty[Value].pureSP[F]) { (acc, n) =>
-          // through the iteration, current accumulated value is always higher than previous accumulated value
-          // after that, we get the highest value
-          for {
-            pre <- acc
-            higherOpt <- if (pre.isEmpty) extractValidValue(n): SP[F, Option[Value]]
-            else
-              for {
-                v <- extractValidValue(n)
-                h <- higherValue(v, pre)
-              } yield h
-          } yield higherOpt
-        }
+        v   <- newValueFromNomination(nom)
       } yield v
 
     // iterate leaders to collect all valid value
@@ -132,36 +155,40 @@ trait NominateHelper[F[_]] extends BaseProgram[F] with EnvelopeProcessProgram[F]
     import valueService._
     for {
       lastNom <- getLatestNomination[Value](nodeId)
-      sane <- isSane(envelope.statement.message)
+      sane    <- isSane(envelope.statement.message)
       isOldMessage = (lastNom.isDefined && lastNom.get.isNewerThan(envelope.statement.message))
-      state <- _if(isOldMessage || !sane, Envelope.State.invalid) {
+      state <- _if(isOldMessage || !sane, Envelope.invalidState) {
         for {
-          _ <- updateLatestNomination(envelope.statement.message)
+          _             <- updateLatestNomination(envelope.statement.message)
           notNominating <- isNotNominating(nodeId, slotIndex)
-          state0 <- _if(notNominating, Envelope.State.valid) {
+          state0 <- _if(notNominating, Envelope.validState) {
             for {
-              promotedAccepted <- promoteVotesToAccepted()
+              round              <- getCurrentRound(nodeId, slotIndex)
+              promotedAccepted   <- promoteVotesToAccepted()
               promotedCandidates <- promoteAcceptedToCandidates()
-              votedFromLeaders <- tryVoteFromLeaders()
+              votedFromLeaders <- tryVoteFromLeaders(nodeId,
+                                                     slotIndex,
+                                                     round,
+                                                     envelope.statement.message)
               modified = promotedAccepted || promotedCandidates || votedFromLeaders
               _ <- __ifThen(modified) {
                 for {
                   round <- getCurrentRound(nodeId, slotIndex)
-                  _ <- emitNomination(nodeId, slotIndex, round)
+                  _     <- emitNomination(nodeId, slotIndex, round)
                 } yield ()
               }
 
               currentBallot <- getCurrentBallot[Value](nodeId, slotIndex)
               _ <- __ifThen(promotedCandidates) {
                 for {
-                  round <- getCurrentRound(nodeId, slotIndex)
-                  candidates <- getCandidates(nodeId, slotIndex, round)
+                  candidates         <- getCandidates(nodeId, slotIndex, round)
                   compositeCandidate <- combineValues(candidates)
-                  _ <- updateLatestCompositeCandidate(nodeId, slotIndex, compositeCandidate)
-                  _ <- __ifThen(currentBallot.isEmpty)(bumpBallotState(nodeId, slotIndex, compositeCandidate))
+                  _                  <- updateLatestCompositeCandidate(nodeId, slotIndex, compositeCandidate)
+                  _ <- __ifThen(currentBallot.isEmpty)(
+                    bumpBallotState(nodeId, slotIndex, compositeCandidate))
                 } yield ()
               }
-            } yield Envelope.State.valid
+            } yield Envelope.validState
           }
         } yield state0
       }
@@ -169,16 +196,51 @@ trait NominateHelper[F[_]] extends BaseProgram[F] with EnvelopeProcessProgram[F]
   }
 
   // federated voting to promote
-  def promoteVotesToAccepted(): SP[F, Boolean] = ???
+  def promoteVotesToAccepted(): SP[F, Boolean]      = ???
   def promoteAcceptedToCandidates(): SP[F, Boolean] = ???
-  def tryVoteFromLeaders(): SP[F, Boolean] = ???
 
-  //todo: move to parent
-  def bumpBallotState(nodeId: NodeID, slotIndex: BigInt, value: Value): SP[F, Unit] = ???
+  def tryVoteFromLeaders[A <: Value](nodeId: NodeID,
+                                     slotIndex: BigInt,
+                                     round: Int,
+                                     message: Message): SP[F, Boolean] = {
+    import nominateStore._
+    message match {
+      case nom @ Message.Nominate(_, _) =>
+        for {
+          candidates <- getCandidates(nodeId, slotIndex, round)
+          leadersOpt <- getRoundLeaders(nodeId, slotIndex, round)
+          leader     <- _if(leadersOpt.isEmpty, false)(isLeader(nodeId, leadersOpt.get))
+          wannaTry = candidates.isEmpty && leader
+          result <- _if(!wannaTry, false) {
+            // let's try
+            for {
+              newValue <- newValueFromNomination(nom)
+              voted <- _if(newValue.isEmpty, false) {
+                for {
+                  newVotes <- vote(newValue.get)
+                  _        <- updateVotes(newVotes, nodeId, slotIndex, round)
+                } yield true
+              }
+            } yield voted
+          }
+        } yield result
+
+      case _ => false.pureSP[F]
+    }
+
+  }
+
 }
 
 object NominateHelper {
   def apply[F[_]](implicit M: components.Model[F]): NominateHelper[F] = new NominateHelper[F] {
     val model = M
+
+    /** bump candidates to ballot protocol
+      * **Notice** This is only for test.
+      */
+    def bumpBallotState(nodeId: NodeID, slotIndex: BigInt, value: Value): SP[F, Unit] = {
+      ().pureSP[F]
+    }
   }
 }
