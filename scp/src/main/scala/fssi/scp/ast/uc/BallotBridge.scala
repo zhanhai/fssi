@@ -14,5 +14,5 @@ trait BallotBridge[F[_]] extends BaseProgram[F] {
 
   /** bump candidates to ballot protocol
     */
-  def bumpBallotState(nodeId: NodeID, slotIndex: BigInt, value: Value): SP[F, Unit]
+  def bumpBallotState(nodeId: NodeID, slotIndex: BigInt, value: Value, counter: Int): SP[F, Boolean]
 }

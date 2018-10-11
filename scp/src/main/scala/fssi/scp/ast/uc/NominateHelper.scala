@@ -184,7 +184,7 @@ trait NominateHelper[F[_]] extends BaseProgram[F] with BallotBridge[F] {
                   compositeCandidate <- combineValues(candidates)
                   _                  <- updateLatestCompositeCandidate(nodeId, slotIndex, compositeCandidate)
                   _ <- __ifThen(currentBallot.isEmpty)(
-                    bumpBallotState(nodeId, slotIndex, compositeCandidate))
+                    bumpBallotState(nodeId, slotIndex, compositeCandidate, 1).map(_ => ())) //init ballot, counter started from 1
                 } yield ()
               }
             } yield Envelope.validState
@@ -354,8 +354,8 @@ object NominateHelper {
     /** bump candidates to ballot protocol
       * **Notice** This is only for test.
       */
-    def bumpBallotState(nodeId: NodeID, slotIndex: BigInt, value: Value): SP[F, Unit] = {
-      ()
+    def bumpBallotState(nodeId: NodeID, slotIndex: BigInt, value: Value, count: Int): SP[F, Boolean] = {
+      true
     }
   }
 }

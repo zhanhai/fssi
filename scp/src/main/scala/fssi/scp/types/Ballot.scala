@@ -9,6 +9,17 @@ case class Ballot[A <: Value](
 
 object Ballot {
 
+  def preparePhase: Phase = Phase.Prepare
+  def confirmPhase: Phase = Phase.Confirm
+  def externalizePhase: Phase = Phase.Externalize
+
+  sealed trait Phase
+  object Phase {
+    case object Prepare extends Phase
+    case object Confirm extends Phase
+    case object Externalize extends Phase
+  }
+
   final class BallotOps[A <: Value](b1: Ballot[A])(implicit O: Ordering[Ballot[A]]) {
     import Ordered._
 
