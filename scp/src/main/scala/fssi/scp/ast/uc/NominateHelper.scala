@@ -120,7 +120,7 @@ trait NominateHelper[F[_]] extends BaseProgram[F] with BallotBridge[F] {
       _ <- processNominationEnvelope(nodeId, slotIndex, nominationEnvelop)
         .assert(_.isValid, new RuntimeException("NominationEnvelop locally processing failed"))
       lastEnvelope <- getLastEmittedEnvelope(nodeId)
-      _ <- __if(
+      _ <- __ifThen(
         lastEnvelope.isEmpty || nominationEnvelop.statement.message
           .isNewerThan(lastEnvelope.get.statement.message)) {
         for {

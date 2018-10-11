@@ -26,6 +26,7 @@ package object interpreter {
       with ValueServiceHandler.Implicits
       with MessageServiceHandler.Implicits
       with BallotStoreHandler.Implicits
+      with BallotServiceHandler.Implicits
       with bigknife.sop.effect.error.ErrorMInstance
 
   object runner {

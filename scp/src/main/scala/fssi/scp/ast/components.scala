@@ -22,5 +22,6 @@ object components {
     val messageService: MessageService[F]
 
     val ballotStore: BallotStore[F]
+    val ballotService: BallotService[F]
   }
 }

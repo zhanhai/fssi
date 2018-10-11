@@ -12,6 +12,8 @@ import fssi.scp.types._
 trait BallotHelper[F[_]] extends BaseProgram[F] {
   import model._
 
+  /** emit ballot envelope based current ballot state
+    */
   protected def emitCurrentStateStatement(nodeId: NodeID, slotIndex: BigInt): SP[F, Unit] = {
     import messageService._
     import ballotStore._
@@ -20,25 +22,109 @@ trait BallotHelper[F[_]] extends BaseProgram[F] {
     // check if can emit now
 
     def buildMessage(phase: Ballot.Phase): SP[F, Message] = phase match {
-      case Ballot.Phase.Prepare => buildPrepareMessage[Value]().map(_.asInstanceOf[Message])
-      case Ballot.Phase.Confirm => buildConfirmMessage[Value]().map(_.asInstanceOf[Message])
+      case Ballot.Phase.Prepare     => buildPrepareMessage[Value]().map(_.asInstanceOf[Message])
+      case Ballot.Phase.Confirm     => buildConfirmMessage[Value]().map(_.asInstanceOf[Message])
       case Ballot.Phase.Externalize => buildExternalizeMessage[Value]().map(_.asInstanceOf[Message])
     }
 
     for {
-      phase <- getCurrentPhase(nodeId, slotIndex)
-      message <- buildMessage(phase)
-      quorumSet <- getQuorumSet(nodeId).get(new RuntimeException(s"No QuorumSet of $nodeId Found"))
-      envelope <- createBallotEnvelope(nodeId, slotIndex, quorumSet, message)
+      phase                <- getCurrentPhase(nodeId, slotIndex)
+      message              <- buildMessage(phase)
+      quorumSet            <- getQuorumSet(nodeId).get(new RuntimeException(s"No QuorumSet of $nodeId Found"))
+      envelope             <- createBallotEnvelope(nodeId, slotIndex, quorumSet, message)
+      processedValid       <- processBallotEnvelopeLocally(nodeId, slotIndex, envelope).map(_.isValid)
+      hasCurrentBallot     <- getCurrentBallot[Value](nodeId, slotIndex).map(_.isDefined)
+      latestBallotMessage  <- getLatestBallotMessage(nodeId)
+      latestEmittedMessage <- getLastEmittedEnvelope(nodeId).map(_.map(_.statement.message))
+      needEmit = processedValid && hasCurrentBallot && (latestBallotMessage.contains(message)) &&
+        (latestEmittedMessage.isEmpty || message.isNewerThan(latestEmittedMessage.get))
+      _ <- __ifThen(needEmit) {
+        for {
+          _ <- updateLatestBallotMessage(nodeId, message)
+          _ <- updateLastEmmitedEnvelop(nodeId, envelope)
+          _ <- emitEnvelope(envelope)
+        } yield ()
+      }
     } yield ()
-    
   }
 
-  protected def checkHeardFromQuorum(nodeId: NodeID, slotIndex: BigInt): SP[F, Unit] = ???
+  /** check heard from quorum
+    * if quorum has been advanced ahead of local, we'll abandon current ballot (neutraliztion)
+    * and then, goto next ballot (counter + 1)
+    * this situation often would hanppened when stucked
+    */
+  protected def checkHeardFromQuorum(nodeId: NodeID, slotIndex: BigInt): SP[F, Unit] = {
+    import ballotStore._
+    import slicesStore._
+    import nodeService._
+    import ballotService._
+
+    def advancedFilter[A <: Value](currentBallot: Ballot[A]): ((NodeID, Message)) => Boolean = {
+      case (_, Message.Prepare(b, _, _, _, _)) => b.counter >= currentBallot.counter
+      case (_, Message.Nominate(_, _))         => false // will never happen
+      case _                                   => true
+    }
+
+    def nodesOfQuorumForAll(nodes: Set[NodeID]): SP[F, Set[NodeID]] = {
+      
+      // if current nodes can't satisfy the isQuorum(v) then remove the `v`(v is a element of node set)
+      def _filter(nodes: Set[NodeID]): SP[F, Set[NodeID]] =
+        nodes.foldLeft(Set.empty[NodeID].pureSP[F]) { (acc, n) =>
+          for {
+            pre    <- acc
+            slices <- getSlices(n).get(new RuntimeException(s"No Slices of $n Found"))
+            quorum <- isQuorum(nodes, slices)
+          } yield if (quorum) (pre + n) else pre
+        }
+
+      // we should loop filter, because it's possible no to satisfy isQuorum(v) when some nodes removed
+      def loop(nodes: Set[NodeID]): SP[F, Set[NodeID]] =
+        for {
+          remains <- _filter(nodes)
+          result  <- _if(remains.size == nodes.size, nodes)(loop(remains))
+        } yield result
+
+      loop(nodes)
+    }
+
+    for {
+      currentBallot <- getCurrentBallot[Value](nodeId, slotIndex)
+      _ <- __ifThen(currentBallot.isDefined) {
+        for {
+          ballotMessages <- getLatestBallotMessages()
+          advancedNodes = ballotMessages
+            .filter(advancedFilter[Value](currentBallot.get))
+            .map(_._1) //_1 is the NodeID
+          nodes  <- nodesOfQuorumForAll(advancedNodes.toSet)
+          slices <- getSlices(nodeId).get(new RuntimeException(s"No QuorumSet of $nodeId Found"))
+          _ <- _if(isNotQuorum(nodes, slices), for {
+            _ <- updateHeardFromQuorum(nodeId, slotIndex, false)
+            _ <- stopBallotProtocolTimer()
+          } yield ()) {
+            //isQuorum
+            for {
+              heardEver <- getHeardFromQuorum(nodeId, slotIndex)
+              _         <- updateHeardFromQuorum(nodeId, slotIndex, true)
+              phase     <- getCurrentPhase(nodeId, slotIndex)
+              _ <- __ifThen(!heardEver && phase != Ballot.externalizePhase)(
+                startBallotProtocolTimer())
+              _ <- __ifThen(phase == Ballot.externalizePhase)(stopBallotProtocolTimer())
+            } yield ()
+          }
+        } yield ()
+      }
+    } yield ()
+  }
 
   /** process ballot envelope
     */
   protected def processBallotEnvelope(nodeId: NodeID,
                                       slotIndex: BigInt,
                                       envelope: Envelope): SP[F, Envelope.State] = ???
+
+  /** process ballot envelope
+    */
+  protected def processBallotEnvelopeLocally(nodeId: NodeID,
+                                             slotIndex: BigInt,
+                                             envelope: Envelope): SP[F, Envelope.State] = ???
 }

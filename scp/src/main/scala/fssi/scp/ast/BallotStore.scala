@@ -22,8 +22,13 @@ import fssi.scp.types._
   def getNextValueBallot[A <: Value](nodeId: NodeID, slotIndex: BigInt): P[F, Option[Ballot[A]]]     // z mValueOverride
   def getLatestBallotMessages(): P[F, Map[NodeID, Message]]                                          // M
 
+  def getLatestBallotMessage(nodeId: NodeID): P[F, Option[Message]] = getLatestBallotMessages().map(_.get(nodeId))
+
   // temp state
-  def getLastEmittedEnvelope(): P[F, Option[Envelope]]
+  def getLastEmittedEnvelope(nodeId: NodeID): P[F, Option[Envelope]]
+  def updateLastEmmitedEnvelop(nodeId: NodeID, envelope: Envelope): P[F, Unit]
+  def getHeardFromQuorum(nodeId: NodeID, slotIndex: BigInt): P[F, Boolean]
+  def updateHeardFromQuorum(nodeId: NodeID, slotIndex: BigInt, heard: Boolean): P[F, Unit]
 
   def isInExternalizePhase(nodeId: NodeID, slotIndex: BigInt): P[F, Boolean] =
     getCurrentPhase(nodeId, slotIndex).map(x =>
@@ -36,6 +41,7 @@ import fssi.scp.types._
                                    slotIndex: BigInt): P[F, Boolean]
 
   def updateCurrentBallot[A <: Value](newBallot: Ballot[A], nodeId: NodeID, slotIndex: BigInt): P[F, Unit]
+  def updateLatestBallotMessage(nodeId: NodeID, message: Message): P[F, Unit]
 
   def checkCurrentStateInvariants(): P[F, Either[Throwable, Unit]]
 

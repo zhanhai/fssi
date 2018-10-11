@@ -44,4 +44,6 @@ import fssi.scp.types._
     */
   def isQuorum(nodes: Set[NodeID], slices: Slices): P[F, Boolean]
 
+  def isNotQuorum(nodes: Set[NodeID], slices: Slices): P[F, Boolean] = isQuorum(nodes, slices).map(!_)
+
 }
