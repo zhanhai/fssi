@@ -14,7 +14,7 @@ trait NominateHelper[F[_]] extends BaseProgram[F] with BallotBridge[F] {
 
   /** calculate leaders for n-th round
     */
-  def roundLeaders(nodeId: NodeID,
+  protected def roundLeaders(nodeId: NodeID,
                    slotIndex: BigInt,
                    round: Int,
                    previousValue: Value): SP[F, Set[NodeID]] = {
@@ -60,10 +60,10 @@ trait NominateHelper[F[_]] extends BaseProgram[F] with BallotBridge[F] {
 
   }
 
-  def isLeader(nodeId: NodeID, leaders: Set[NodeID]): SP[F, Boolean] =
+  protected def isLeader(nodeId: NodeID, leaders: Set[NodeID]): SP[F, Boolean] =
     leaders.exists(_ === nodeId).pureSP[F]
 
-  def newValueFromNomination[A <: Value](nom: Message.Nominate[A]): SP[F, Option[Value]] = {
+  protected def newValueFromNomination[A <: Value](nom: Message.Nominate[A]): SP[F, Option[Value]] = {
     // through the iteration, current accumulated value is always higher than previous accumulated value
     // after that, we get the highest value
     import valueService._
@@ -84,7 +84,7 @@ trait NominateHelper[F[_]] extends BaseProgram[F] with BallotBridge[F] {
     } yield v
   }
 
-  def votesFromLeaders(leaders: Set[NodeID]): SP[F, Set[Value]] = {
+  protected def votesFromLeaders(leaders: Set[NodeID]): SP[F, Set[Value]] = {
     import nominateStore._
     import valueService._
 
@@ -104,9 +104,9 @@ trait NominateHelper[F[_]] extends BaseProgram[F] with BallotBridge[F] {
     }
   }
 
-  def vote(value: Value): SP[F, Set[Value]] = Set(value).pureSP[F]
+  protected def vote(value: Value): SP[F, Set[Value]] = Set(value).pureSP[F]
 
-  def emitNomination(nodeId: NodeID, slotIndex: BigInt, round: Int): SP[F, Unit] = {
+  protected def emitNomination(nodeId: NodeID, slotIndex: BigInt, round: Int): SP[F, Unit] = {
     import slicesStore._
     import nominateStore._
     import messageService._
@@ -131,7 +131,7 @@ trait NominateHelper[F[_]] extends BaseProgram[F] with BallotBridge[F] {
     } yield ()
   }
 
-  def setupNominateTimer(nodeId: NodeID,
+  protected def setupNominateTimer(nodeId: NodeID,
                          slotIndex: BigInt,
                          value: Value,
                          previousValue: Value): SP[F, Unit] = {
@@ -145,7 +145,7 @@ trait NominateHelper[F[_]] extends BaseProgram[F] with BallotBridge[F] {
     } yield ()
   }
 
-  def processNominationEnvelope(nodeId: NodeID,
+  protected def processNominationEnvelope(nodeId: NodeID,
                                 slotIndex: BigInt,
                                 envelope: Envelope): SP[F, Envelope.State] = {
 
@@ -195,7 +195,7 @@ trait NominateHelper[F[_]] extends BaseProgram[F] with BallotBridge[F] {
   }
 
   // federated voting to promote
-  def promoteVotesToAccepted(nodeId: NodeID,
+  protected def promoteVotesToAccepted(nodeId: NodeID,
                              slotIndex: BigInt,
                              round: Int,
                              message: Message): SP[F, Boolean] = {
@@ -263,7 +263,7 @@ trait NominateHelper[F[_]] extends BaseProgram[F] with BallotBridge[F] {
 
   }
 
-  def promoteAcceptedToCandidates(nodeId: NodeID,
+  protected def promoteAcceptedToCandidates(nodeId: NodeID,
                                   slotIndex: BigInt,
                                   round: Int,
                                   message: Message): SP[F, Boolean] = {
@@ -314,7 +314,7 @@ trait NominateHelper[F[_]] extends BaseProgram[F] with BallotBridge[F] {
 
   // if current candidates is empty, and node is a leader, then
   // vote from peer's message
-  def tryVoteFromLeaders[A <: Value](nodeId: NodeID,
+  protected def tryVoteFromLeaders[A <: Value](nodeId: NodeID,
                                      slotIndex: BigInt,
                                      round: Int,
                                      message: Message): SP[F, Boolean] = {

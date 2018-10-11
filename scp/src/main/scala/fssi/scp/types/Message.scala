@@ -59,7 +59,8 @@ object Message {
     cCounter: Int
   ) extends Message
 
-  /** Commit Message.
+
+  /** Confirm Message.
     * The message conveys the following federated vote messages, 
     * where infinity is 2^{32} (a value greater than any ballot counter representable in serialized form):
     * 
@@ -69,7 +70,7 @@ object Message {
     * 4. confirm prepare(<hCounter, ballot.value>)
     * 5. vote commit(<n, ballot.value>) for every n >= cCounter
     */
-  case class Commit[A <: Value](
+  case class Confirm[A <: Value](
     ballot: Ballot[A],
     preparedCounter: Int,
     hCounter: Int,

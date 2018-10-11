@@ -1,18 +1,21 @@
-package fssi
-package scp
-package ast
-package uc
+package fssi.scp
 
-import org.scalatest._
-import fssi.scp.types._
+import fssi.scp.ast.uc.SCPProgram
+import fssi.scp.ast.components
+import fssi.scp.ast.uc.NominateHelper
 import fssi.scp.interpreter._
+import fssi.scp.types._
+import org.scalatest._
 
-class NominateHelperSpec extends FunSuite {
-  val nominateHelper = NominateHelper[components.Model.Op]
+class SCPProgramSpec extends FunSuite {
+
+  val scpProgram = SCPProgram[components.Model.Op]
   val setting = Setting()
 
   test("get round leaders") {
+    scpProgram
 
+    /*
     val node1 = NodeID("node1".getBytes)
     val node2 = NodeID("node2".getBytes)
     val node3 = NodeID("node3".getBytes)
@@ -42,6 +45,7 @@ class NominateHelperSpec extends FunSuite {
       val res = runner.runIO(p(1, i), setting).unsafeRunSync
       info(s"round $i: $res")
     }
+    */
 
   }
 }

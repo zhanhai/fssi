@@ -33,5 +33,5 @@ trait BaseProgram[F[_]] {
   implicit def toSPEitherOps[A, E <: Throwable](x: P[F, Either[E, A]]): SPEitherOps[A, E] =
     new SPEitherOps(x: SP[F, Either[E, A]])
 
-  
+
 }

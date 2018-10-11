@@ -9,7 +9,7 @@ import bigknife.sop.implicits._
 
 import fssi.scp.types._
 
-trait NominateProgram[F[_]] extends BaseProgram[F] with NominateHelper[F] {
+trait NominateProgram[F[_]] extends BaseProgram[F] with NominateHelper[F] with ProcessEnvelopeProgram[F] {
   import model._
 
   /** some node (identified by a NodeID) nominate a value for the slot indexed by slotIndex on n-th round,

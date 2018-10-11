@@ -17,6 +17,8 @@ import fssi.scp.types._
                                           votes: Set[A],
                                           accepted: Set[A]): P[F, Envelope]
 
+  def createBallotEnvelope(nodeId: NodeID, slotIndex: BigInt, quorumSet: QuorumSet, message: Message): P[F, Envelope]
 
   def emitEnvelope(envelope: Envelope): P[F, Unit]
+
 }

@@ -22,8 +22,25 @@ import fssi.scp.types._
   def getNextValueBallot[A <: Value](nodeId: NodeID, slotIndex: BigInt): P[F, Option[Ballot[A]]]     // z mValueOverride
   def getLatestBallotMessages(): P[F, Map[NodeID, Message]]                                          // M
 
+  // temp state
+  def getLastEmittedEnvelope(): P[F, Option[Envelope]]
+
   def isInExternalizePhase(nodeId: NodeID, slotIndex: BigInt): P[F, Boolean] =
     getCurrentPhase(nodeId, slotIndex).map(x =>
       (x != Ballot.preparePhase) && (x != Ballot.confirmPhase))
 
+  /** update local state
+    */
+  def needUpdateBallot[A <: Value](newBallot: Ballot[A],
+                                   nodeId: NodeID,
+                                   slotIndex: BigInt): P[F, Boolean]
+
+  def updateCurrentBallot[A <: Value](newBallot: Ballot[A], nodeId: NodeID, slotIndex: BigInt): P[F, Unit]
+
+  def checkCurrentStateInvariants(): P[F, Either[Throwable, Unit]]
+
+  // based on current state , create envelope to emit
+  def buildPrepareMessage[A <: Value](): P[F, Message.Prepare[A]]
+  def buildConfirmMessage[A <: Value](): P[F, Message.Confirm[A]]
+  def buildExternalizeMessage[A <: Value](): P[F, Message.Externalize[A]]
 }

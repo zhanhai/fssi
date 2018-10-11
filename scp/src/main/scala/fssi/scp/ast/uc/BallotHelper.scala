@@ -10,12 +10,35 @@ import bigknife.sop.implicits._
 import fssi.scp.types._
 
 trait BallotHelper[F[_]] extends BaseProgram[F] {
+  import model._
 
-  /** update local state
+  protected def emitCurrentStateStatement(nodeId: NodeID, slotIndex: BigInt): SP[F, Unit] = {
+    import messageService._
+    import ballotStore._
+    import slicesStore._
+    // create envelope via current phase
+    // check if can emit now
+
+    def buildMessage(phase: Ballot.Phase): SP[F, Message] = phase match {
+      case Ballot.Phase.Prepare => buildPrepareMessage[Value]().map(_.asInstanceOf[Message])
+      case Ballot.Phase.Confirm => buildConfirmMessage[Value]().map(_.asInstanceOf[Message])
+      case Ballot.Phase.Externalize => buildExternalizeMessage[Value]().map(_.asInstanceOf[Message])
+    }
+
+    for {
+      phase <- getCurrentPhase(nodeId, slotIndex)
+      message <- buildMessage(phase)
+      quorumSet <- getQuorumSet(nodeId).get(new RuntimeException(s"No QuorumSet of $nodeId Found"))
+      envelope <- createBallotEnvelope(nodeId, slotIndex, quorumSet, message)
+    } yield ()
+    
+  }
+
+  protected def checkHeardFromQuorum(nodeId: NodeID, slotIndex: BigInt): SP[F, Unit] = ???
+
+  /** process ballot envelope
     */
-  def updateLocalState[A <: Value](newBallot: Ballot[A], nodeId: NodeID, slotIndex: BigInt): SP[F, Boolean] = ???
-
-  def emitCurrentStateStatement(nodeId: NodeID, slotIndex: BigInt): SP[F, Unit] = ???
-
-  def checkHeardFromQuorum(nodeId: NodeID, slotIndex: BigInt): SP[F, Unit] = ???
+  protected def processBallotEnvelope(nodeId: NodeID,
+                                      slotIndex: BigInt,
+                                      envelope: Envelope): SP[F, Envelope.State] = ???
 }
