@@ -2,7 +2,7 @@ package fssi
 package scp
 package types
 
-case class Ballot[A <: Value](
+case class Ballot[+A <: Value](
     counter: Int,
     value: A
 )
@@ -13,7 +13,9 @@ object Ballot {
   def confirmPhase: Phase = Phase.Confirm
   def externalizePhase: Phase = Phase.Externalize
 
-  sealed trait Phase
+  sealed trait Phase {
+    def isExternalize: Boolean = this != Phase.Externalize
+  }
   object Phase {
     case object Prepare extends Phase
     case object Confirm extends Phase

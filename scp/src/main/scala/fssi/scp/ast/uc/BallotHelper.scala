@@ -36,7 +36,7 @@ trait BallotHelper[F[_]] extends BaseProgram[F] {
       hasCurrentBallot     <- getCurrentBallot[Value](nodeId, slotIndex).map(_.isDefined)
       latestBallotMessage  <- getLatestBallotMessage(nodeId)
       latestEmittedMessage <- getLastEmittedEnvelope(nodeId).map(_.map(_.statement.message))
-      needEmit = processedValid && hasCurrentBallot && (latestBallotMessage.contains(message)) &&
+      needEmit = processedValid && hasCurrentBallot && (!latestBallotMessage.contains(message)) &&
         (latestEmittedMessage.isEmpty || message.isNewerThan(latestEmittedMessage.get))
       _ <- __ifThen(needEmit) {
         for {
@@ -209,7 +209,7 @@ trait BallotHelper[F[_]] extends BaseProgram[F] {
 
     // ??? mCurrentMessageLevel
     for {
-      pa <- attemptPreparedAccept()
+      pa <- attemptPreparedAccept(nodeId, slotIndex, envelope)
       pc <- attemptPreparedConfirmed()
       ac <- attemptAcceptCommit()
       cc <- attemptConfirmCommit()
@@ -226,10 +226,139 @@ trait BallotHelper[F[_]] extends BaseProgram[F] {
   }
 
   //placeholder
-  private def attemptPreparedAccept(): SP[F, Boolean] = ???
+  // step 1-5 @paper
+  private def attemptPreparedAccept(nodeId: NodeID,
+                                    slotIndex: BigInt,
+                                    envelope: Envelope): SP[F, Boolean] = {
+    import ballotStore._
+    import messageService._
+    import slicesStore._
+
+    // filter some ballots, remains what can help us to advance current state
+    def helpToAdvancedFilter[A <: Value](ballots: Vector[Ballot[A]]): SP[F, Vector[Ballot[A]]] = {
+      ballots.foldLeft(Vector.empty[Ballot[A]].pureSP[F]) { (acc, n) =>
+        for {
+          pre                    <- acc
+          phase                  <- getCurrentPhase(nodeId, slotIndex)
+          prepared               <- getCurrentPreparedBallot[A](nodeId, slotIndex)
+          commit                 <- getCurrentCommitBallot[A](nodeId, slotIndex)
+          compatibleWithPrepared <- _if(prepared.isEmpty, false)(isCompatible[A](n, prepared.get))
+          greaterThanPrepared <- _if(prepared.isEmpty, false)(
+            compareBallots[A](n, prepared.get).map(_ >= 0))
+          compatibleWithCommit <- _if(commit.isEmpty, false)(isCompatible[A](n, commit.get))
+
+          c1 = phase == Ballot.Phase.Confirm && (!(compatibleWithPrepared && greaterThanPrepared) || !compatibleWithCommit)
+
+          nRemoved <- _if(c1, true) {
+            for {
+              preparedPrime <- getCurrentPreparedPrimeBallot[A](nodeId, slotIndex)
+              greaterThanPreparedPrime <- _if(preparedPrime.isEmpty, true)(
+                compareBallots(n, preparedPrime.get).map(_ >= 0))
+              remvedWhenPreparedPrime <- _if(!greaterThanPreparedPrime, true) {
+                // see prepare when not on Phase.Confirm
+                _if(prepared.isEmpty, false) {
+                  for {
+                    c    <- isCompatible[A](n, prepared.get)
+                    less <- compareBallots[A](n, prepared.get).map(_ <= 0)
+                  } yield c && less
+                }
+              }
+            } yield remvedWhenPreparedPrime
+          }
+        } yield if (nRemoved) pre else pre :+ n
+      }
+    }
+
+    // see other nodes if they have voted ballot
+    def nodesToVoteBallot[A <: Value](ballot: Ballot[A],
+                                      messages: Map[NodeID, Message]): SP[F, Set[NodeID]] = {
+      def hasVoted(message: Message): SP[F, Boolean] = message match {
+        case Message.Prepare(b, _, _, _, _) =>
+          for {
+            less <- compareBallots(ballot, b).map(_ <= 0)
+            c    <- isCompatible(ballot, b)
+          } yield less && c
+        case Message.Confirm(b, _, _, _) => isCompatible(ballot, b)
+        case Message.Externalize(c, _)   => isCompatible(ballot, c)
+        case _                           => false
+      }
+
+      messages.foldLeft(Set.empty[NodeID].pureSP[F]) { (acc, n) =>
+        for {
+          pre   <- acc
+          voted <- hasVoted(n._2)
+        } yield if (voted) pre + n._1 else pre
+      }
+    }
+
+    // see other nodes if they have accepted ballot
+    def nodesToAcceptBallot[A <: Value](ballot: Ballot[A],
+                                        messages: Map[NodeID, Message]): SP[F, Set[NodeID]] = {
+
+      def hasAccepted(message: Message): SP[F, Boolean] =
+        message match {
+          case Message.Prepare(_, prepared, preparedPrime, _, _)
+              if prepared.isDefined && preparedPrime.isDefined =>
+            for {
+              lessThanPrepared            <- compareBallots(ballot, prepared.get).map(_ <= 0)
+              lessThanPreparedPrime       <- compareBallots(ballot, preparedPrime.get).map(_ <= 0)
+              compatibleWithPrepared      <- isCompatible(ballot, prepared.get)
+              compatibleWithPreparedPrime <- isCompatible(ballot, preparedPrime.get)
+            } yield
+              lessThanPrepared && lessThanPreparedPrime && compatibleWithPrepared && compatibleWithPreparedPrime
+          case Message.Confirm(b, nPrepared, _, _) =>
+            val nb = b.copy(counter = nPrepared)
+            for {
+              lessThanPrepared       <- compareBallots(ballot, nb).map(_ <= 0)
+              compatibleWithPrepared <- isCompatible(ballot, nb)
+            } yield lessThanPrepared && compatibleWithPrepared
+          case Message.Externalize(c, _) => isCompatible(ballot, c)
+          case _                         => false
+        }
+
+      messages.foldLeft(Set.empty[NodeID].pureSP[F]) { (acc, n) =>
+        for {
+          pre      <- acc
+          accepted <- hasAccepted(n._2)
+        } yield if (accepted) pre + n._1 else pre
+      }
+
+    }
+
+    def updateState[A <: Value](ballot: Ballot[A]): SP[F, Boolean] = ???
+
+    for {
+      phase <- getCurrentPhase(nodeId, slotIndex)
+      result <- _if(phase.isExternalize, false) {
+        for {
+          candidatedPrepares <- getPrepareCandidates[Value](envelope.statement.message)
+          filtered           <- helpToAdvancedFilter(candidatedPrepares.toVector)
+          sorted             <- sortBallots[Value](filtered)
+          accepted <- sorted.foldRight(false.pureSP[F]) { (n, acc) =>
+            for {
+              pre <- acc
+              r <- _if(pre, true) {
+                for {
+                  messages <- getLatestBallotMessages()
+                  votes    <- nodesToVoteBallot(n, messages)
+                  accepted <- nodesToAcceptBallot(n, messages)
+                  slices <- getSlices(nodeId).get(
+                    new RuntimeException(s"No Slices of $nodeId Found"))
+                  acceptedAndUpdated <- _if(federatedAccepted(votes, accepted, slices).map(!_),
+                                            false)(updateState(n))
+                } yield acceptedAndUpdated
+              }
+            } yield r
+          }
+        } yield accepted
+
+      }
+    } yield result
+  }
+
   private def attemptPreparedConfirmed(): SP[F, Boolean] = ???
-  private def attemptAcceptCommit(): SP[F, Boolean] = ???
-  private def attemptConfirmCommit(): SP[F, Boolean] = ???
-  private def attemptBumpAll(): SP[F, Boolean] = ??? // @see BallotProtocol.cpp, line 1856-1867
+  private def attemptAcceptCommit(): SP[F, Boolean]      = ???
+  private def attemptConfirmCommit(): SP[F, Boolean]     = ???
+  private def attemptBumpAll(): SP[F, Boolean]           = ??? // @see BallotProtocol.cpp, line 1856-1867
 
 }

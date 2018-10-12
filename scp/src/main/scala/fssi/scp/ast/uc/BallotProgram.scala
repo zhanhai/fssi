@@ -21,7 +21,7 @@ trait BallotProgram[F[_]] extends BaseProgram[F] with BallotBridge[F] with Ballo
     for {
       result <- _if(isInExternalizePhase(nodeId, slotIndex), false) {
         for {
-          newValue <- getNextValueBallot[Value](nodeId, slotIndex).map(_.map(_.value)).getOrElse(value)
+          newValue <- getCurrentNextValueBallot[Value](nodeId, slotIndex).map(_.map(_.value)).getOrElse(value)
           newBallot = Ballot(counter = counter, value = newValue)
           need <- needUpdateBallot[Value](newBallot, nodeId, slotIndex)
           updated  <- _if(!need, false) {

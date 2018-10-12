@@ -15,18 +15,18 @@ import fssi.scp.types._
   // current phase, 𝜑
   def getCurrentPhase(nodeId: NodeID, slotIndex: BigInt): P[F, Ballot.Phase]                         // 𝜑
   def getCurrentBallot[A <: Value](nodeId: NodeID, slotIndex: BigInt): P[F, Option[Ballot[A]]]       // b
-  def getPreparedBallot[A <: Value](nodeId: NodeID, slotIndex: BigInt): P[F, Option[Ballot[A]]]      // p
-  def getPreparedPrimeBallot[A <: Value](nodeId: NodeID, slotIndex: BigInt): P[F, Option[Ballot[A]]] // p'
-  def getLowestBallot[A <: Value](nodeId: NodeID, slotIndex: BigInt): P[F, Option[Ballot[A]]]        // c, commit
-  def getHighestBallot[A <: Value](nodeId: NodeID, slotIndex: BigInt): P[F, Option[Ballot[A]]]       // h
-  def getNextValueBallot[A <: Value](nodeId: NodeID, slotIndex: BigInt): P[F, Option[Ballot[A]]]     // z mValueOverride
+  def getCurrentPreparedBallot[A <: Value](nodeId: NodeID, slotIndex: BigInt): P[F, Option[Ballot[A]]]      // p
+  def getCurrentPreparedPrimeBallot[A <: Value](nodeId: NodeID, slotIndex: BigInt): P[F, Option[Ballot[A]]] // p'
+  def getCurrentLowestBallot[A <: Value](nodeId: NodeID, slotIndex: BigInt): P[F, Option[Ballot[A]]]        // c, commit
+  def getCurrentHighestBallot[A <: Value](nodeId: NodeID, slotIndex: BigInt): P[F, Option[Ballot[A]]]       // h
+  def getCurrentNextValueBallot[A <: Value](nodeId: NodeID, slotIndex: BigInt): P[F, Option[Ballot[A]]]     // z mValueOverride
   def getLatestBallotMessages(): P[F, Map[NodeID, Message]]                                          // M
 
   def getLatestBallotMessage(nodeId: NodeID): P[F, Option[Message]] = getLatestBallotMessages().map(_.get(nodeId))
 
   //alias
   def getCurrentCommitBallot[A <: Value](nodeId: NodeID, slotIndex: BigInt): P[F, Option[Ballot[A]]] =
-    getLowestBallot(nodeId, slotIndex)
+    getCurrentLowestBallot(nodeId, slotIndex)
 
   // temp state
   def getLastEmittedEnvelope(nodeId: NodeID): P[F, Option[Envelope]]
