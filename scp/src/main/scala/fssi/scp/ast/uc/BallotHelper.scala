@@ -66,7 +66,7 @@ trait BallotHelper[F[_]] extends BaseProgram[F] {
     }
 
     def nodesOfQuorumForAll(nodes: Set[NodeID]): SP[F, Set[NodeID]] = {
-      
+
       // if current nodes can't satisfy the isQuorum(v) then remove the `v`(v is a element of node set)
       def _filter(nodes: Set[NodeID]): SP[F, Set[NodeID]] =
         nodes.foldLeft(Set.empty[NodeID].pureSP[F]) { (acc, n) =>
@@ -120,11 +120,116 @@ trait BallotHelper[F[_]] extends BaseProgram[F] {
     */
   protected def processBallotEnvelope(nodeId: NodeID,
                                       slotIndex: BigInt,
-                                      envelope: Envelope): SP[F, Envelope.State] = ???
+                                      envelope: Envelope): SP[F, Envelope.State] = {
+    import ballotStore._
+    for {
+      valid <- checkValidity(envelope, nodeId, slotIndex)
+      state <- _if(!valid, Envelope.invalidState) {
+        for {
+          phase            <- getCurrentPhase(nodeId, slotIndex)
+          phaseHandleState <- handleEnvelopeOnPhase(nodeId, slotIndex, phase, envelope)
+        } yield phaseHandleState
+      }
+    } yield state
+  }
 
   /** process ballot envelope
     */
   protected def processBallotEnvelopeLocally(nodeId: NodeID,
                                              slotIndex: BigInt,
                                              envelope: Envelope): SP[F, Envelope.State] = ???
+
+  // a node(nodeId) check the validity of an ballot envelope which was received from peer nodes or self
+  private def checkValidity(envelope: Envelope,
+                            nodeId: NodeID,
+                            slotIndex: BigInt): SP[F, Boolean] = {
+    import messageService._
+    import slicesStore._
+    import slicesService._
+    import ballotStore._
+
+    _if(slotIndex != envelope.statement.slotIndex, false) {
+      _if(hasBeenTampered(envelope), false) {
+        for {
+          slicesOfPeer <- updateAndGetSlices(envelope.statement.nodeId,
+                                             envelope.statement.quorumSet)
+          slicesOfPeerSane <- _if(slicesOfPeer.isEmpty, false)(isSlicesSane(slicesOfPeer.get))
+          finalSanity <- _if(!slicesOfPeerSane, false) {
+            for {
+              statementSane <- isStatementSane(receiver = nodeId, envelope.statement)
+              newer <- _if(!statementSane, false) {
+                for {
+                  latestBallotMessage <- getLatestBallotMessage(envelope.statement.nodeId)
+                } yield
+                  (latestBallotMessage.isEmpty || envelope.statement.message
+                    .isNewerThan(latestBallotMessage.get))
+              }
+            } yield newer
+          }
+        } yield finalSanity
+      }
+    }
+
+  }
+
+  // @see papers, p24
+  // Upon adding a newly received message m to Mv, a node v updates its state as follows:
+  // It's not necessary to copy from `scp-core`, we can implement them just as what the paper said.
+  private def handleEnvelopeOnPhase(nodeId: NodeID,
+                                    slotIndex: BigInt,
+                                    phase: Ballot.Phase,
+                                    envelope: Envelope): SP[F, Envelope.State] = {
+    import ballotStore._
+    import messageService._
+    phase match {
+      case Ballot.Phase.Externalize =>
+        for {
+          c <- getCurrentCommitBallot[Value](nodeId, slotIndex)
+          b <- getWorkingBallot[Value](envelope.statement.message)
+          state <- _if(c.isEmpty || b.isEmpty || c != b, Envelope.invalidState) {
+            for {
+              _ <- updateLatestBallotMessage(envelope.statement.nodeId, envelope.statement.message)
+            } yield Envelope.validState
+          }
+        } yield state
+
+      case _ =>
+        // warning: in stellar-core(cpp), check the value on application level to get validity level,
+        //          the level turn into a flag to see if we could emit somthing.
+        //          here, we ignore this feature, we do `save and advance` directly
+        //          see: BallotProtocol.cpp, line 192
+        for {
+          _ <- updateLatestBallotMessage(envelope.statement.nodeId, envelope.statement.message)
+          _ <- advanceSlot(nodeId, slotIndex, envelope)
+        } yield Envelope.validState
+    }
+  }
+
+  private def advanceSlot(nodeId: NodeID, slotIndex: BigInt, envelope: Envelope): SP[F, Unit] = {
+
+    // ??? mCurrentMessageLevel
+    for {
+      pa <- attemptPreparedAccept()
+      pc <- attemptPreparedConfirmed()
+      ac <- attemptAcceptCommit()
+      cc <- attemptConfirmCommit()
+      ba <- attemptBumpAll()
+      worked = pa || pc || ac || cc || ba
+      _ <- __ifThen(worked)(sendLatestEnvelope())
+    } yield ()
+  }
+
+  private def sendLatestEnvelope(): SP[F, Unit] = {
+    import ballotStore._
+    // @see BallotProtocol.cpp line 1933
+    ???
+  }
+
+  //placeholder
+  private def attemptPreparedAccept(): SP[F, Boolean] = ???
+  private def attemptPreparedConfirmed(): SP[F, Boolean] = ???
+  private def attemptAcceptCommit(): SP[F, Boolean] = ???
+  private def attemptConfirmCommit(): SP[F, Boolean] = ???
+  private def attemptBumpAll(): SP[F, Boolean] = ??? // @see BallotProtocol.cpp, line 1856-1867
+
 }

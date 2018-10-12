@@ -24,4 +24,8 @@ import fssi.scp.types._
     *   { t:1, { innerSet } } into innerSet
     */
   def simplify(slices: Slices): P[F, Slices]
+
+  /** @see QuorumSetUtils.cpp, line 47, QuorumSetSanityChecker::checkSanity(SCPQuorumSet const& qSet, int depth)
+    */
+  def isSlicesSane(slices: Slices): P[F, Boolean]
 }

@@ -16,4 +16,9 @@ import fssi.scp.types._
   /** get quorum set of a node
     */
   def getQuorumSet(nodeId: NodeID): P[F, Option[QuorumSet]]
+
+  /** update nodeId's quorum set
+    */
+  def updateQuorumSet(nodeId: NodeID, quorumSet: QuorumSet): P[F, Unit]
+  
 }

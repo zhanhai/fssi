@@ -24,9 +24,14 @@ import fssi.scp.types._
 
   def getLatestBallotMessage(nodeId: NodeID): P[F, Option[Message]] = getLatestBallotMessages().map(_.get(nodeId))
 
+  //alias
+  def getCurrentCommitBallot[A <: Value](nodeId: NodeID, slotIndex: BigInt): P[F, Option[Ballot[A]]] =
+    getLowestBallot(nodeId, slotIndex)
+
   // temp state
   def getLastEmittedEnvelope(nodeId: NodeID): P[F, Option[Envelope]]
   def updateLastEmmitedEnvelop(nodeId: NodeID, envelope: Envelope): P[F, Unit]
+  def getLatestGeneratedEnvelope(nodeId: NodeID): P[F, Option[Envelope]]
   def getHeardFromQuorum(nodeId: NodeID, slotIndex: BigInt): P[F, Boolean]
   def updateHeardFromQuorum(nodeId: NodeID, slotIndex: BigInt, heard: Boolean): P[F, Unit]
 

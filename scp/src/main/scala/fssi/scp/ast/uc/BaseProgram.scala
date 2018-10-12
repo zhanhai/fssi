@@ -27,9 +27,17 @@ trait BaseProgram[F[_]] {
   protected def __if(cond: Boolean)(sp: => SP[F, Unit]): SP[F, Unit]        = _if(cond, ())(sp)
   protected def __ifThen(cond: Boolean)(_then: => SP[F, Unit]): SP[F, Unit] = __if(!cond)(_then)
 
+  protected def updateAndGetSlices(nodeId: NodeID, quorumSet: QuorumSet): SP[F, Option[Slices]] = {
+    import model.slicesStore._
+    for {
+      _         <- updateQuorumSet(nodeId, quorumSet)
+      slicesOpt <- getSlices(nodeId)
+    } yield slicesOpt
+  }
+
   protected def federatedAccepted(votedNodes: => SP[F, Set[NodeID]],
-                        acceptedNodes: => SP[F, Set[NodeID]],
-                        slices: Slices): SP[F, Boolean] = {
+                                  acceptedNodes: => SP[F, Set[NodeID]],
+                                  slices: Slices): SP[F, Boolean] = {
     import model.nodeService._
     for {
       accepted    <- acceptedNodes
@@ -43,10 +51,11 @@ trait BaseProgram[F[_]] {
     } yield result
   }
 
-  protected def federatedRatified(acceptedNodes: => SP[F, Set[NodeID]], slices: Slices): SP[F, Boolean] = {
+  protected def federatedRatified(acceptedNodes: => SP[F, Set[NodeID]],
+                                  slices: Slices): SP[F, Boolean] = {
     import model.nodeService._
     for {
-      accepted <- acceptedNodes
+      accepted       <- acceptedNodes
       quorumAccepted <- isQuorum(accepted, slices)
     } yield quorumAccepted
   }
@@ -90,7 +99,8 @@ trait BaseProgram[F[_]] {
         a  <- model.err.either(ax)
       } yield a
   }
-  protected implicit def toSPEitherOps[A, E <: Throwable](x: P[F, Either[E, A]]): SPEitherOps[A, E] =
+  protected implicit def toSPEitherOps[A, E <: Throwable](
+      x: P[F, Either[E, A]]): SPEitherOps[A, E] =
     new SPEitherOps(x: SP[F, Either[E, A]])
 
 }
