@@ -24,6 +24,15 @@ import fssi.scp.types._
 
   def getLatestBallotMessage(nodeId: NodeID): P[F, Option[Message]] = getLatestBallotMessages().map(_.get(nodeId))
 
+  def updateCurrentPreparedPrimeBallot[A <: Value](nodeId: NodeID, slotIndex: BigInt, b: Ballot[A]): P[F, Unit]
+  def updateCurrentPreparedBallot[A <: Value](nodeId: NodeID, slotIndex: BigInt, b: Ballot[A]): P[F, Unit]
+  def updateCurrentHighestBallot[A <: Value](nodeId: NodeID, slotIndex: BigInt, b: Ballot[A]): P[F, Unit]
+  def updateCurrentLowestBallot[A <: Value](nodeId: NodeID, slotIndex: BigInt, b: Ballot[A]): P[F, Unit]
+  def updateCurrentCommitBallot[A <: Value](nodeId: NodeID, slotIndex: BigInt, b: Ballot[A]): P[F, Unit] =
+    updateCurrentLowestBallot(nodeId, slotIndex, b)
+
+  def resetCurrentHighestBallot(nodeId: NodeID, slotIndex: BigInt): P[F, Unit]
+
   //alias
   def getCurrentCommitBallot[A <: Value](nodeId: NodeID, slotIndex: BigInt): P[F, Option[Ballot[A]]] =
     getCurrentLowestBallot(nodeId, slotIndex)

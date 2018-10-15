@@ -14,7 +14,10 @@ object Ballot {
   def externalizePhase: Phase = Phase.Externalize
 
   sealed trait Phase {
-    def isExternalize: Boolean = this != Phase.Externalize
+    def isExternalize: Boolean = this == Phase.Externalize
+    def isPrepae: Boolean = this == Phase.Prepare
+    def isNotPrepae: Boolean = this != Phase.Prepare
+    
   }
   object Phase {
     case object Prepare extends Phase

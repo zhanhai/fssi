@@ -210,7 +210,7 @@ trait BallotHelper[F[_]] extends BaseProgram[F] {
     // ??? mCurrentMessageLevel
     for {
       pa <- attemptPreparedAccept(nodeId, slotIndex, envelope)
-      pc <- attemptPreparedConfirmed()
+      pc <- attemptPreparedConfirmed(nodeId, slotIndex, envelope)
       ac <- attemptAcceptCommit()
       cc <- attemptConfirmCommit()
       ba <- attemptBumpAll()
@@ -325,7 +325,63 @@ trait BallotHelper[F[_]] extends BaseProgram[F] {
 
     }
 
-    def updateState[A <: Value](ballot: Ballot[A]): SP[F, Boolean] = ???
+    /** set current ballot states, if current state changed, return true */
+    def updateState[A <: Value](ballot: Ballot[A]): SP[F, Boolean] = {
+      // set prepare and preparePrime
+      def setPrepared(): SP[F, Boolean] =
+        for {
+          prepared <- getCurrentPreparedBallot[A](nodeId, slotIndex)
+          comNum   <- _if(prepared.isEmpty, 1)(compareBallots[A](ballot, prepared.get))
+          modified <- if (comNum > 0) for {
+            c <- _if(prepared.isEmpty, false)(isCompatible(prepared.get, ballot))
+            _ <- __ifThen(!c && prepared.isDefined) {
+              for {
+                _ <- updateCurrentPreparedPrimeBallot(nodeId, slotIndex, prepared.get)
+              } yield ()
+            }
+            _ <- updateCurrentPreparedBallot(nodeId, slotIndex, ballot)
+          } yield true
+          else if (comNum < 0) for {
+            preparedPrime <- getCurrentPreparedPrimeBallot[A](nodeId, slotIndex)
+            comNumPrime <- _if(preparedPrime.isEmpty, 1)(
+              compareBallots[A](ballot, preparedPrime.get))
+            primeModified <- _if(comNum <= 0, false) {
+              for {
+                _ <- updateCurrentPreparedPrimeBallot(nodeId, slotIndex, ballot)
+              } yield true
+            }
+          } yield primeModified
+          else false.pureSP[F]
+        } yield modified
+      // check if we also need clear c (commit, lowest ballot)
+      def clearCommit(): SP[F, Boolean] =
+        for {
+          commit   <- getCurrentCommitBallot[A](nodeId, slotIndex)
+          high     <- getCurrentHighestBallot[A](nodeId, slotIndex)
+          prepared <- getCurrentPreparedBallot[A](nodeId, slotIndex)
+          c1 <- _if(prepared.isEmpty || high.isEmpty, false) {
+            for {
+              less         <- compareBallots(high.get, prepared.get).map(_ <= 0)
+              incompatible <- isCompatible(high.get, prepared.get)
+            } yield less && incompatible
+          }
+          preparedPrime <- getCurrentPreparedPrimeBallot[A](nodeId, slotIndex)
+          c2 <- _if(preparedPrime.isEmpty || high.isEmpty, false) {
+            for {
+              less         <- compareBallots(high.get, preparedPrime.get).map(_ <= 0)
+              incompatible <- isCompatible(high.get, preparedPrime.get)
+            } yield less && incompatible
+          }
+        } yield c1 || c2
+
+      for {
+        c1 <- setPrepared()
+        c2 <- clearCommit()
+        modified = c1 || c2
+        _ <- __ifThen(modified)(emitCurrentStateStatement(nodeId, slotIndex))
+      } yield modified
+
+    }
 
     for {
       phase <- getCurrentPhase(nodeId, slotIndex)
@@ -356,9 +412,250 @@ trait BallotHelper[F[_]] extends BaseProgram[F] {
     } yield result
   }
 
-  private def attemptPreparedConfirmed(): SP[F, Boolean] = ???
-  private def attemptAcceptCommit(): SP[F, Boolean]      = ???
-  private def attemptConfirmCommit(): SP[F, Boolean]     = ???
-  private def attemptBumpAll(): SP[F, Boolean]           = ??? // @see BallotProtocol.cpp, line 1856-1867
+  private def attemptPreparedConfirmed(nodeId: NodeID,
+                                       slotIndex: BigInt,
+                                       envelope: Envelope): SP[F, Boolean] = {
+
+    import ballotStore._
+    import messageService._
+    import slicesStore._
+
+    def findNewH[A <: Value](sorted: Vector[Ballot[A]]): SP[F, Option[Ballot[A]]] = {
+      def accepted(message: Message, ballot: Ballot[A]): SP[F, Boolean] = message match {
+        case Message.Prepare(_, prepared, pareparedPrime, _, _) =>
+          for {
+            less <- compareBallots(ballot, prepared.get).map(_ <= 0)
+            c    <- isCompatible(ballot, prepared.get)
+          } yield less && c
+        case Message.Confirm(Ballot(_, value), preparedCounter, _, _) =>
+          val b = Ballot(preparedCounter, value)
+          for {
+            less <- compareBallots(ballot, b).map(_ <= 0)
+            c    <- isCompatible(ballot, b)
+          } yield less && c
+        case Message.Externalize(c, _) => isCompatible(c, ballot)
+        case _                         => false
+      }
+
+      def ratified(ballot: Ballot[A], messages: Map[NodeID, Message]): SP[F, Boolean] = {
+        val acceptedNodes = messages.foldLeft(Set.empty[NodeID].pureSP[F]) {
+          case (acc, (nodeId, message)) =>
+            for {
+              pre <- acc
+              x   <- accepted(message, ballot)
+            } yield if (x) pre + nodeId else pre
+        }
+
+        for {
+          slices <- getSlices(nodeId).get(new RuntimeException(s"No Slices of $nodeId Found"))
+          fa     <- federatedRatified(acceptedNodes, slices)
+        } yield fa
+
+      }
+      /*
+        envelope.statement.message match {
+        case Message.Prepare(_, prepared, pareparedPrime, _, _) =>
+          for {
+            less <- compareBallots(ballot, prepared.get).map(_ <= 0)
+            c <- isCompatible(ballot, prepared.get)
+          } yield less && c
+
+        case _ => false
+      }*/
+
+      if (sorted.isEmpty) Option.empty[Ballot[A]]
+      else {
+        // if we had a h, and h is greater than any ballots, nothing to return
+        for {
+          h <- getCurrentHighestBallot[A](nodeId, slotIndex)
+          biggest = sorted.last
+          breakOnBiggest <- _if(h.isEmpty, false)(compareBallots[A](h.get, biggest).map(_ >= 0))
+          result <- _if(breakOnBiggest, Option.empty[Ballot[A]]) {
+            for {
+              messages <- getLatestBallotMessages()
+              newBallot <- sorted.foldRight(Option.empty[Ballot[A]].pureSP[F]) { (n, acc) =>
+                for {
+                  pre <- acc
+                  next <- _if(pre.isDefined, pre)(ratified(n, messages).map(x =>
+                    if (x) Some(n) else None))
+                } yield next
+              }
+            } yield newBallot
+          }
+        } yield result
+      }
+    }
+
+    def findNewC[A <: Value](sorted: Vector[Ballot[A]],
+                             newH: Ballot[A]): SP[F, Option[Ballot[A]]] = {
+      def accepted(message: Message, ballot: Ballot[A]): SP[F, Boolean] = message match {
+        case Message.Prepare(_, prepared, pareparedPrime, _, _) =>
+          for {
+            less <- compareBallots(ballot, prepared.get).map(_ <= 0)
+            c    <- isCompatible(ballot, prepared.get)
+          } yield less && c
+        case Message.Confirm(Ballot(_, value), preparedCounter, _, _) =>
+          val b = Ballot(preparedCounter, value)
+          for {
+            less <- compareBallots(ballot, b).map(_ <= 0)
+            c    <- isCompatible(ballot, b)
+          } yield less && c
+        case Message.Externalize(c, _) => isCompatible(c, ballot)
+        case _                         => false
+      }
+      def ratified(ballot: Ballot[A], messages: Map[NodeID, Message]): SP[F, Boolean] = {
+        val acceptedNodes = messages.foldLeft(Set.empty[NodeID].pureSP[F]) {
+          case (acc, (nodeId, message)) =>
+            for {
+              pre <- acc
+              x   <- accepted(message, ballot)
+            } yield if (x) pre + nodeId else pre
+        }
+
+        for {
+          slices <- getSlices(nodeId).get(new RuntimeException(s"No Slices of $nodeId Found"))
+          fa     <- federatedRatified(acceptedNodes, slices)
+        } yield fa
+
+      }
+      // setp(3) in the paper
+      // If𝜑=PREPARE, 𝑐=𝟎, 𝑏≤h, and neither 𝑝 ⋧ h nor 𝑝′ ⋧ h,then set 𝑐 to the lowest ballot satisfying 𝑏 ≤ 𝑐 ≲ h.
+      for {
+        c <- getCurrentCommitBallot[A](nodeId, slotIndex)
+        r <- _if(c.isDefined, Option.empty[Ballot[A]]) {
+          for {
+            prepared <- getCurrentPreparedBallot[A](nodeId, slotIndex)
+            preparedPassed <- _if(prepared.isEmpty, true) {
+              for {
+                less <- compareBallots(newH, prepared.get).map(_ <= 0)
+                c    <- isCompatible(newH, prepared.get)
+              } yield !(less && c)
+            }
+            r0 <- _if(!preparedPassed, Option.empty[Ballot[A]]) {
+              for {
+                preparedPrime <- getCurrentPreparedPrimeBallot[A](nodeId, slotIndex)
+                preparedPrimePassed <- _if(preparedPrime.isEmpty, true) {
+                  for {
+                    less <- compareBallots(newH, preparedPrime.get).map(_ <= 0)
+                    c    <- isCompatible(newH, preparedPrime.get)
+                  } yield !(less && c)
+                }
+                r00 <- _if(!preparedPrimePassed, Option.empty[Ballot[A]]) {
+                  for {
+                    messages <- getLatestBallotMessages()
+                    b        <- getCurrentBallot[A](nodeId, slotIndex)
+                    r000 <- sorted.foldRight((Option.empty[Ballot[A]], false).pureSP[F]) {
+                      (n, acc) =>
+                        // _2 is break tag
+                        for {
+                          pre <- acc
+                          next <- _if(pre._2, pre) {
+                            for {
+                              lessB <- _if(b.isEmpty, false)(compareBallots(n, b.get).map(_ < 0)) // lessB, break
+                              x <- _if(lessB, (pre._1, true)) {
+                                for {
+                                  less <- compareBallots(n, newH).map(_ <= 0)
+                                  c    <- isCompatible(n, newH)
+                                  x0 <- _if(!(less && c), pre) {
+                                    for {
+                                      ra  <- ratified(n, messages)
+                                      x00 <- _if(ra, (Option(n), pre._2))((pre._1, true)) // else break
+                                    } yield x00
+                                  }
+                                } yield x0
+                              }
+                            } yield x
+                          }
+                        } yield next
+                    }
+                  } yield r000._1
+                }
+              } yield r00
+            }
+          } yield r0
+        }
+      } yield r
+    }
+
+    def updateState[A <: Value](newH: Ballot[A], newC: Option[Ballot[A]]): SP[F, Boolean] = {
+      for {
+        b  <- getCurrentBallot[A](nodeId, slotIndex)
+        h  <- getCurrentHighestBallot[A](nodeId, slotIndex)
+        c1 <- _if(b.isEmpty, false)(isCompatible(b.get, newH))
+        c2 <- _if(h.isEmpty, false)(compareBallots(newH, h.get).map(_ > 0))
+        result <- _if(!(c1 && c2), false) {
+          for {
+            modifyH <- _if(h.isEmpty, true)(compareBallots(newH, h.get).map(_ > 0))
+            _       <- __ifThen(modifyH)(updateCurrentHighestBallot(nodeId, slotIndex, newH))
+            modifyC <- _if(newC.isEmpty, false) {
+              for {
+                _ <- updateCurrentCommitBallot(nodeId, slotIndex, newC.get)
+              } yield true
+            }
+            modifyB <- updateCurrentIfNeeded[A](nodeId, slotIndex, newH)
+            modified = modifyH || modifyC || modifyB
+            _ <- __ifThen(modified)(emitCurrentStateStatement(nodeId, slotIndex))
+          } yield modified
+        }
+      } yield result
+    }
+
+    for {
+      phase    <- getCurrentPhase(nodeId, slotIndex)
+      prepared <- getCurrentPreparedBallot[Value](nodeId, slotIndex)
+      result <- _if(phase.isPrepae || prepared.isEmpty, false) {
+        for {
+          candidatedPrepares <- getPrepareCandidates[Value](envelope.statement.message)
+          sorted             <- sortBallots[Value](candidatedPrepares.toVector)
+          newH               <- findNewH[Value](sorted)
+          result <- _if(newH.isEmpty, false) {
+            for {
+              newC    <- findNewC[Value](sorted, newH.get)
+              updated <- updateState(newH.get, newC)
+            } yield updated
+          }
+        } yield result
+      }
+    } yield result
+  }
+
+  private def attemptAcceptCommit(): SP[F, Boolean]  = ???
+  private def attemptConfirmCommit(): SP[F, Boolean] = ???
+  private def attemptBumpAll(): SP[F, Boolean]       = ??? // @see BallotProtocol.cpp, line 1856-1867
+
+  private def bumpToBallot[A <: Value](nodeId: NodeID, slotIndex: BigInt, ballot: Ballot[A], check: Boolean): SP[F, Unit] = {
+    import ballotStore._
+    import messageService._
+    for {
+      phase <- getCurrentPhase(nodeId, slotIndex)
+      _ <- __ifThen(!phase.isExternalize) {
+        for {
+          _ <- __ifThen(check) {
+            for {
+              b <- getCurrentBallot[A](nodeId, slotIndex)
+              checkSP = (_if(b.isEmpty, true)(compareBallots[A](ballot, b.get).map(_ >= 0)))
+              _ <- checkSP.assert((x: Boolean) => x , new RuntimeException("chacke failed, ballot shoud greater currentBallot"))
+            } yield ()
+          }
+          b <- getCurrentBallot[A](nodeId, slotIndex)
+          gotBumped = (b.isEmpty || b.get.counter != ballot.counter)
+          _ <- updateCurrentBallot[A](ballot, nodeId, slotIndex)
+          h <- getCurrentHighestBallot[A](nodeId, slotIndex)
+          hNeedReset <- _if(h.isEmpty || b.isEmpty, false)(isCompatible(h.get, b.get).map(!_))
+          _ <- __ifThen(hNeedReset)(resetCurrentHighestBallot(nodeId, slotIndex))
+          _ <- __ifThen(gotBumped)(updateHeardFromQuorum(nodeId, slotIndex, false))
+        } yield ()
+      }
+    } yield ()
+  }
+  private def updateCurrentIfNeeded[A <: Value](nodeId: NodeID, slotIndex: BigInt, h: Ballot[A]): SP[F, Boolean] = {
+    import ballotStore._
+    import messageService._
+    for {
+      b       <- getCurrentBallot[A](nodeId, slotIndex)
+      modifyB <- _if(b.isEmpty, true)(compareBallots(b.get, h).map(_ < 0))
+      _       <- __ifThen(modifyB)(bumpToBallot(nodeId, slotIndex, h, true))
+    } yield modifyB
+  }
 
 }
